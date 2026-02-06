@@ -156,7 +156,7 @@ class Spinner:
 
 # Define the Code AI agent with instructions
 agent = Agent(
-    'openai:gpt-4o',
+    'bedrock:us.anthropic.claude-sonnet-4-5-20250514-v1:0',
     instructions="""You are Code AI, a helpful AI assistant specialized in code analysis, 
     Jupyter notebooks, and data science workflows. You help users with:
     - Writing and debugging code
@@ -201,12 +201,66 @@ def _show_version() -> None:
     typer.echo(f"{GRAY}Powered by Datalayer • \033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{RESET}")
 
 
+def _run_agent_runtime_server(host: str, port: int, agent_id: str, codemode: bool, protocol):
+    """Run the agent-runtimes server (for multiprocessing).
+    
+    This must be a module-level function (not nested) to be picklable.
+    """
+    import logging
+    import sys
+    import os
+    from agent_runtimes.commands import serve_server
+    from agent_runtimes.config.agents import get_agent_spec
+    
+    # Only suppress logging if not in debug mode
+    debug_mode = os.environ.get('CODEAI_DEBUG') == '1'
+    
+    if not debug_mode:
+        # Redirect stdout and stderr to devnull to keep terminal clean
+        devnull = open(os.devnull, 'w')
+        sys.stdout = devnull
+        sys.stderr = devnull
+        
+        # Suppress all logging
+        logging.getLogger().setLevel(logging.CRITICAL)
+        logging.getLogger("uvicorn").setLevel(logging.CRITICAL)
+        logging.getLogger("uvicorn.access").setLevel(logging.CRITICAL)
+        logging.getLogger("uvicorn.error").setLevel(logging.CRITICAL)
+        logging.getLogger("rich").setLevel(logging.CRITICAL)
+        
+        # Disable Rich console output
+        os.environ["TERM"] = "dumb"
+        os.environ["NO_COLOR"] = "1"
+    else:
+        # Enable debug logging
+        logging.basicConfig(level=logging.DEBUG)
+        print(f"[DEBUG] Starting agent runtime server in debug mode")
+    
+    # Load agent spec to get MCP servers
+    mcp_servers_str = "tavily"  # Default fallback
+    agent_spec = get_agent_spec(agent_id)
+    if agent_spec and agent_spec.mcp_servers:
+        mcp_servers_str = ",".join([server.id for server in agent_spec.mcp_servers])
+    
+    serve_server(
+        host=host,
+        port=port,
+        agent_id=agent_id,
+        agent_name="codeai",
+        no_config_mcp_servers=True,  # Disable config MCP servers
+        mcp_servers=mcp_servers_str,  # Use MCP servers from agent spec
+        codemode=codemode,  # Enable/disable codemode based on flag
+        protocol=protocol,
+    )
+
+
 def _start_agent_runtime_server(
     agent_id: str,
     host: str = "127.0.0.1",
     port: int = 8000,
     transport: Transport = Transport.ag_ui,
     codemode: bool = True,
+    debug: bool = False,
 ) -> tuple[multiprocessing.Process, int]:
     """Start agent-runtimes server in a background process.
     
@@ -216,6 +270,7 @@ def _start_agent_runtime_server(
         port: Starting port (will find free port if taken)
         transport: Transport protocol to use (ag-ui or acp)
         codemode: Enable codemode (default True)
+        debug: Enable debug logging (default False)
         
     Returns:
         Tuple of (process, actual_port)
@@ -235,40 +290,16 @@ def _start_agent_runtime_server(
     # Map transport to protocol
     protocol = Protocol.ag_ui if transport == Transport.ag_ui else Protocol.ag_ui  # ACP uses same server
     
-    def run_server():
-        """Run the server in a subprocess."""
-        import logging
-        import sys
+    # Set debug environment variable if needed
+    if debug:
         import os
-        
-        # Redirect stdout and stderr to devnull to keep terminal clean
-        devnull = open(os.devnull, 'w')
-        sys.stdout = devnull
-        sys.stderr = devnull
-        
-        # Suppress all logging
-        logging.getLogger().setLevel(logging.CRITICAL)
-        logging.getLogger("uvicorn").setLevel(logging.CRITICAL)
-        logging.getLogger("uvicorn.access").setLevel(logging.CRITICAL)
-        logging.getLogger("uvicorn.error").setLevel(logging.CRITICAL)
-        logging.getLogger("rich").setLevel(logging.CRITICAL)
-        
-        # Disable Rich console output
-        os.environ["TERM"] = "dumb"
-        os.environ["NO_COLOR"] = "1"
-        
-        serve_server(
-            host=host,
-            port=actual_port,
-            agent_id=agent_id,
-            agent_name="codeai",
-            no_config_mcp_servers=True,  # Disable config MCP servers
-            mcp_servers="tavily",  # Only use tavily from catalog
-            codemode=codemode,  # Enable/disable codemode based on flag
-            protocol=protocol,
-        )
+        os.environ['CODEAI_DEBUG'] = '1'
     
-    process = multiprocessing.Process(target=run_server, daemon=True)
+    process = multiprocessing.Process(
+        target=_run_agent_runtime_server,
+        args=(host, actual_port, agent_id, codemode, protocol),
+        daemon=True
+    )
     process.start()
     
     return process, actual_port
@@ -333,6 +364,12 @@ def main_callback(
         "-B",
         help="Show animated banner with Matrix rain and black hole animations"
     ),
+    debug: bool = typer.Option(
+        False,
+        "--debug",
+        "-d",
+        help="Enable debug mode with verbose logging (shows tool execution details)"
+    ),
     codemode_disabled: bool = typer.Option(
         False,
         "--codemode-disabled",
@@ -388,7 +425,7 @@ def main_callback(
             if agent_id:
                 print(f"{GRAY}Starting agent-runtimes server with {agent_id}...{RESET}")
                 process, actual_port = _start_agent_runtime_server(
-                    agent_id, port=port, transport=Transport.ag_ui, codemode=not codemode_disabled
+                    agent_id, port=port, transport=Transport.ag_ui, codemode=not codemode_disabled, debug=debug
                 )
                 _subprocess_ref = process  # Register for cleanup
                 
@@ -438,7 +475,7 @@ def main_callback(
                     refresh_per_second=10,
                 ) as live:
                     process, actual_port = _start_agent_runtime_server(
-                        agent_id, port=port, transport=Transport.ag_ui, codemode=not codemode_disabled
+                        agent_id, port=port, transport=Transport.ag_ui, codemode=not codemode_disabled, debug=debug
                     )
                     _subprocess_ref = process  # Register for cleanup
                     
