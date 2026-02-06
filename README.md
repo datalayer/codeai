@@ -10,22 +10,15 @@
 
 # ✨ CodeAI
 
-[![Github Actions Status](https://github.com/datalayer/codeai/workflows/Build/badge.svg)](https://github.com/datalayer/codeai/actions/workflows/build.yml)
 [![PyPI - Version](https://img.shields.io/pypi/v/codeai)](https://pypi.org/project/codeai)
 
 > A CLI for data analysis that interacts with the Agent Runtimes via AG-UI and ACP protocols.
 
 Code AI is an AI-powered CLI agent built on [Pydantic AI](https://ai.pydantic.dev/) that helps with code analysis, Jupyter notebooks, and data science workflows.
 
-<img src="https://images.datalayer.io/products/codeai/codeai.webm"/>
+<img src="https://images.datalayer.io/products/codeai/codeai_short.gif"/>
 
 ## Installation
-
-### Quick Install (Recommended)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/datalayer/codeai/main/install.sh | bash
-```
 
 ### Via pip
 
@@ -39,6 +32,12 @@ pip install codeai
 git clone https://github.com/datalayer/codeai.git
 cd codeai
 pip install -e .
+```
+
+### Quick Install (Recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/datalayer/codeai/main/install.sh | bash
 ```
 
 ## Prerequisites
