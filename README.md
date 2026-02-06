@@ -14,9 +14,9 @@
 
 > A CLI for data analysis that interacts with the Agent Runtimes via AG-UI and ACP protocols.
 
-Code AI is an AI-powered CLI agent built on [Pydantic AI](https://ai.pydantic.dev/) that helps with code analysis, Jupyter notebooks, and data science workflows.
+Code AI is an AI-powered CLI agent built on [Pydantic AI](https://ai.pydantic.dev) that helps with code analysis, Jupyter notebooks, and data science workflows.
 
-<img src="https://images.datalayer.io/products/codeai/codeai_short.gif"/>
+<img src="https://images.datalayer.io/products/codeai/codeai_short_cut.gif"/>
 
 ## Installation
 
