@@ -40,23 +40,8 @@ pip install -e .
 curl -fsSL https://raw.githubusercontent.com/datalayer/codeai/main/install.sh | bash
 ```
 
-## Prerequisites
-
-You'll need to set up your OpenAI API key:
-
-```bash
-export OPENAI_API_KEY='your-api-key-here'
-```
 
 ## Usage
-
-### Interactive Mode
-
-Launch the interactive CLI to chat with Code AI:
-
-```bash
-codeai
-```
 
 Special commands available in interactive mode:
 - `/exit`: Exit the session
@@ -64,13 +49,20 @@ Special commands available in interactive mode:
 - `/multiline`: Toggle multiline input mode (use Ctrl+D to submit)
 - `/cp`: Copy the last response to clipboard
 
-### Single Query Mode
+### Launch with Preconfigured Agent
 
-Run a single query from the command line:
+You can launch CodeAI with a specific agent configuration using the `--agent-id` parameter:
 
 ```bash
-codeai "How do I create a pandas DataFrame?"
+codeai --agent-id codemode-paper/financial-viz
 ```
+
+Available agent IDs can be found in the [agentspecs repository](https://github.com/datalayer/agentspecs/tree/main/agentspecs/agents). Each agent is optimized for specific tasks and comes with pre-configured tools and capabilities.
+
+**Important:** Before launching an agent, make sure to set the required environment variables for its MCP servers and skills. Check the agent's configuration in the agentspecs repository to see which MCP servers and skills it uses, then refer to:
+- [MCP Servers environment variables](https://github.com/datalayer/agentspecs/tree/main/agentspecs/mcp-servers)
+- [Skills environment variables](https://github.com/datalayer/agentspecs/tree/main/agentspecs/skills)
+- [Environment variables documentation](https://github.com/datalayer/agentspecs/tree/main/agentspecs/envvars)
 
 ### Custom Agent
 
