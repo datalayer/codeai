@@ -488,116 +488,24 @@ class CodeAITux:
         """Display context usage visualization."""
         try:
             async with httpx.AsyncClient() as client:
-                url = f"{self.server_url}/api/v1/configure/agents/{self.agent_id}/context-snapshot"
+                url = f"{self.server_url}/api/v1/configure/agents/{self.agent_id}/context-table?show_context=false"
                 response = await client.get(url, timeout=10.0)
                 response.raise_for_status()
                 data = response.json()
         except Exception as e:
             self.console.print(f"[red]Error fetching context: {e}[/red]")
             return
-        
-        # Extract data
-        total_tokens = data.get("totalTokens", 0)
-        context_window = data.get("contextWindow", 128000)
-        system_tokens = data.get("systemPromptTokens", 0)
-        tool_tokens = data.get("toolTokens", 0)
-        user_tokens = data.get("userMessageTokens", 0)
-        assistant_tokens = data.get("assistantMessageTokens", 0)
-        message_tokens = user_tokens + assistant_tokens
-        
-        # Calculate percentages
-        usage_percent = (total_tokens / context_window) * 100 if context_window > 0 else 0
-        free_tokens = context_window - total_tokens
-        free_percent = 100 - usage_percent
-        
-        # Autocompact buffer (22.5% like Claude)
-        buffer_percent = 22.5
-        buffer_tokens = int(context_window * buffer_percent / 100)
-        
-        system_percent = (system_tokens / context_window) * 100 if context_window > 0 else 0
-        tool_percent = (tool_tokens / context_window) * 100 if context_window > 0 else 0
-        message_percent = (message_tokens / context_window) * 100 if context_window > 0 else 0
-        
-        # Build the grid (10x10 = 100 cells)
-        grid_size = 100
-        
-        # Calculate how many cells each category takes
-        system_cells = int(system_percent)
-        tool_cells = int(tool_percent)
-        message_cells = int(message_percent)
-        buffer_cells = int(buffer_percent)
-        free_cells = grid_size - system_cells - tool_cells - message_cells - buffer_cells
-        
-        # Build grid
-        grid = []
-        cell_idx = 0
-        
-        # System prompt cells
-        for _ in range(system_cells):
-            grid.append((SYMBOL_SYSTEM, STYLE_PRIMARY))
-            cell_idx += 1
-        
-        # Tool cells
-        for _ in range(tool_cells):
-            grid.append((SYMBOL_TOOLS, STYLE_ACCENT))
-            cell_idx += 1
-        
-        # Message cells
-        for _ in range(message_cells):
-            grid.append((SYMBOL_MESSAGES, STYLE_PRIMARY))
-            cell_idx += 1
-        
-        # Free cells
-        for _ in range(free_cells):
-            grid.append((SYMBOL_FREE, STYLE_MUTED))
-            cell_idx += 1
-        
-        # Buffer cells
-        for _ in range(min(buffer_cells, grid_size - cell_idx)):
-            grid.append((SYMBOL_BUFFER, STYLE_WARNING))
-            cell_idx += 1
-        
-        # Pad if needed
-        while len(grid) < grid_size:
-            grid.append((SYMBOL_FREE, STYLE_MUTED))
-        
-        # Render the grid
-        output = Text()
-        output.append("  ⎿  \n", style=STYLE_MUTED)
-        output.append("      Context Usage\n", style=STYLE_WHITE)
-        
-        # Grid rows (10 columns x 10 rows)
-        for row in range(10):
-            output.append("     ")
-            for col in range(10):
-                idx = row * 10 + col
-                if idx < len(grid):
-                    symbol, style = grid[idx]
-                    output.append(f"{symbol} ", style=style)
-            
-            # Add legend items on certain rows
-            if row == 0:
-                output.append(f"  {self.model_name} · {self._format_tokens(total_tokens)}/{self._format_tokens(context_window)} tokens ({usage_percent:.0f}%)", style=STYLE_MUTED)
-            elif row == 2:
-                output.append(f"  {SYMBOL_SYSTEM} System prompt: {self._format_tokens(system_tokens)} tokens ({system_percent:.1f}%)", style=STYLE_PRIMARY)
-            elif row == 3:
-                output.append(f"  {SYMBOL_TOOLS} System tools: {self._format_tokens(tool_tokens)} tokens ({tool_percent:.1f}%)", style=STYLE_ACCENT)
-            elif row == 4:
-                output.append(f"  {SYMBOL_MESSAGES} Messages: {self._format_tokens(message_tokens)} tokens ({message_percent:.1f}%)", style=STYLE_PRIMARY)
-            elif row == 5:
-                output.append(f"  {SYMBOL_FREE} Free space: {self._format_tokens(free_tokens)} ({free_percent:.1f}%)", style=STYLE_MUTED)
-            elif row == 6:
-                output.append(f"  {SYMBOL_BUFFER} Autocompact buffer: {self._format_tokens(buffer_tokens)} tokens ({buffer_percent:.1f}%)", style=STYLE_WARNING)
-            
-            output.append("\n")
-        
-        # Tool summary
-        tools = data.get("tools", [])
-        if tools:
-            output.append(f"\n     Tools · {len(tools)} tools\n", style=STYLE_WHITE)
-            output.append(f"     └ Total: {self._format_tokens(tool_tokens)} tokens\n", style=STYLE_MUTED)
-        
-        self.console.print(output)
+
+        if data.get("error"):
+            self.console.print(f"[red]{data.get('error')}[/red]")
+            return
+
+        table_text = data.get("table", "").rstrip()
+        if table_text:
+            self.console.print(Text.from_ansi(table_text))
+        else:
+            self.console.print("[red]No table content returned.[/red]")
+        return
     
     async def _cmd_cls(self) -> None:
         """Clear the screen."""
@@ -963,64 +871,42 @@ class CodeAITux:
 
     async def _cmd_context_export(self) -> None:
         """Export the current context to a CSV file."""
-        import csv
-        from datetime import datetime
-        
         try:
             async with httpx.AsyncClient() as client:
-                url = f"{self.server_url}/api/v1/configure/agents/{self.agent_id}/context-snapshot"
+                url = f"{self.server_url}/api/v1/configure/agents/{self.agent_id}/context-export"
                 response = await client.get(url, timeout=10.0)
                 response.raise_for_status()
                 data = response.json()
         except Exception as e:
             self.console.print(f"[red]Error fetching context: {e}[/red]")
             return
-        
-        # Generate filename with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"codeai_context_{timestamp}.csv"
-        
+
+        if data.get("error"):
+            self.console.print(f"[red]{data.get('error')}[/red]")
+            return
+
+        filename = data.get("filename", "codeai_context.csv")
+        csv_content = data.get("csv", "")
+
+        if not csv_content:
+            self.console.print("[red]No CSV content returned.[/red]")
+            return
+
         try:
             with open(filename, "w", newline="") as csvfile:
-                writer = csv.writer(csvfile)
-                
-                # Write header
-                writer.writerow(["Category", "Key", "Value"])
-                
-                # Write general info
-                writer.writerow(["General", "Agent ID", self.agent_id])
-                writer.writerow(["General", "Model", data.get("modelName", "unknown")])
-                writer.writerow(["General", "Context Window", data.get("contextWindow", 0)])
-                writer.writerow(["General", "Total Tokens", data.get("totalTokens", 0)])
-                
-                # Write token breakdown
-                writer.writerow(["Tokens", "System Prompt", data.get("systemPromptTokens", 0)])
-                writer.writerow(["Tokens", "Tool Definitions", data.get("toolTokens", 0)])
-                writer.writerow(["Tokens", "User Messages", data.get("userMessageTokens", 0)])
-                writer.writerow(["Tokens", "Assistant Messages", data.get("assistantMessageTokens", 0)])
-                writer.writerow(["Tokens", "Total Input", data.get("sumResponseInputTokens", 0)])
-                writer.writerow(["Tokens", "Total Output", data.get("sumResponseOutputTokens", 0)])
-                
-                # Write tools
-                tools = data.get("tools", [])
-                for tool in tools:
-                    writer.writerow(["Tool", tool.get("name", "unknown"), tool.get("description", "")])
-                
-                # Write messages summary
-                messages = data.get("messages", [])
-                for i, msg in enumerate(messages):
-                    role = msg.get("role", "unknown")
-                    content = msg.get("content", "")
-                    # Truncate long content for CSV
-                    if len(content) > 200:
-                        content = content[:197] + "..."
-                    writer.writerow(["Message", f"{i+1}. {role}", content])
-            
+                csvfile.write(csv_content)
+
+            tools_count = data.get("toolsCount", 0)
+            messages_count = data.get("messagesCount", 0)
+
             self.console.print()
             self.console.print(f"● Context exported to {filename}", style=STYLE_ACCENT)
-            self.console.print(f"  Contains {len(tools)} tools and {len(data.get('messages', []))} messages", style=STYLE_MUTED)
+            if tools_count or messages_count:
+                self.console.print(
+                    f"  Contains {tools_count} tools and {messages_count} messages",
+                    style=STYLE_MUTED,
+                )
             self.console.print()
-            
         except IOError as e:
             self.console.print(f"[red]Error writing file: {e}[/red]")
 
