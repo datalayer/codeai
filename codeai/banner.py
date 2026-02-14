@@ -34,6 +34,7 @@ GREEN_DARK = '\033[38;2;22;160;133m'    # #16A085 - Green brand
 GREEN_MEDIUM = '\033[38;2;26;188;156m'  # #1ABC9C - Green accent
 GREEN_LIGHT = '\033[38;2;46;204;113m'   # #2ECC71 - Green bright
 GREEN_TEXT = '\033[38;2;17;122;101m'    # #117A65 - Accessible green text
+RED = '\033[38;2;231;76;60m'            # #E74C3C - Error / missing
 GRAY = '\033[38;2;89;89;92m'            # #59595C - Secondary text
 WHITE = '\033[38;2;255;255;255m'        # #FFFFFF - Primary text (dark mode)
 

@@ -70,6 +70,7 @@ from .banner import (
     GREEN_DARK,
     GREEN_MEDIUM,
     GREEN_LIGHT,
+    RED,
     GRAY,
     WHITE,
     # Legacy colors
@@ -203,15 +204,24 @@ def _show_version() -> None:
     typer.echo(f"{GRAY}Powered by Datalayer • \033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{RESET}")
 
 
-def _run_agent_runtime_server(host: str, port: int, agent_id: str, codemode: bool, protocol):
+def _run_agent_runtime_server(host: str, port: int, agent_id: str, codemode: bool, protocol, port_value=None):
     """Run the agent-runtimes server (for multiprocessing).
     
     This must be a module-level function (not nested) to be picklable.
+
+    Args:
+        host: Host to bind to
+        port: Requested port (0 = auto-select a random free port)
+        agent_id: Agent spec ID
+        codemode: Enable codemode
+        protocol: Transport protocol
+        port_value: Optional multiprocessing.Value('i') to communicate the
+            effective port back to the parent process.
     """
     import logging
     import sys
     import os
-    from agent_runtimes.commands import serve_server
+    from agent_runtimes.commands import serve_server, find_random_free_port
     from agent_runtimes.specs.agents import get_agent_spec
     
     # Only suppress logging if not in debug mode
@@ -238,21 +248,34 @@ def _run_agent_runtime_server(host: str, port: int, agent_id: str, codemode: boo
         logging.basicConfig(level=logging.DEBUG)
         print(f"[DEBUG] Starting agent runtime server in debug mode")
     
-    # Load agent spec to get MCP servers
+    # Resolve port in this process so we can communicate it back
+    actual_port = port
+    if port == 0:
+        actual_port = find_random_free_port(host)
+
+    # Write effective port to shared value so the parent process can read it
+    if port_value is not None:
+        port_value.value = actual_port
+
+    # Load agent spec to get MCP servers and sandbox variant
     mcp_servers_str = "tavily"  # Default fallback
+    sandbox_variant = "jupyter"  # Default for codeai
     agent_spec = get_agent_spec(agent_id)
-    if agent_spec and agent_spec.mcp_servers:
-        mcp_servers_str = ",".join([server.id for server in agent_spec.mcp_servers])
+    if agent_spec:
+        if agent_spec.mcp_servers:
+            mcp_servers_str = ",".join([server.id for server in agent_spec.mcp_servers])
+        if agent_spec.sandbox_variant:
+            sandbox_variant = agent_spec.sandbox_variant
     
     serve_server(
         host=host,
-        port=port,
+        port=actual_port,
         agent_id=agent_id,
         agent_name="codeai",
         no_config_mcp_servers=True,  # Disable config MCP servers
         mcp_servers=mcp_servers_str,  # Use MCP servers from agent spec
         codemode=codemode,  # Enable/disable codemode based on flag
-        sandbox_variant="jupyter" if codemode else None,
+        sandbox_variant=sandbox_variant if codemode else None,
         protocol=protocol,
     )
 
@@ -260,7 +283,7 @@ def _run_agent_runtime_server(host: str, port: int, agent_id: str, codemode: boo
 def _start_agent_runtime_server(
     agent_id: str,
     host: str = "127.0.0.1",
-    port: int = 8000,
+    port: int = 0,
     transport: Transport = Transport.ag_ui,
     codemode: bool = True,
     debug: bool = False,
@@ -270,7 +293,7 @@ def _start_agent_runtime_server(
     Args:
         agent_id: Agent spec ID to start
         host: Host to bind to
-        port: Starting port (will find free port if taken)
+        port: Port to bind to (0 = auto-select a random free port)
         transport: Transport protocol to use (ag-ui or acp)
         codemode: Enable codemode (default True)
         debug: Enable debug logging (default False)
@@ -278,17 +301,7 @@ def _start_agent_runtime_server(
     Returns:
         Tuple of (process, actual_port)
     """
-    from agent_runtimes.commands import serve_server, is_port_free, find_free_port, ServeError, Protocol
-    
-    # Find a free port
-    actual_port = port
-    if not is_port_free(host, port):
-        try:
-            actual_port = find_free_port(host, port)
-            print(f"{GRAY}Port {port} is in use, using port {actual_port}{RESET}")
-        except ServeError as e:
-            print(f"{GREEN_DARK}[ERROR]{RESET} {e}", file=sys.stderr)
-            raise typer.Exit(1)
+    from agent_runtimes.commands import Protocol
     
     # Map transport to protocol
     protocol = Protocol.ag_ui if transport == Transport.ag_ui else Protocol.ag_ui  # ACP uses same server
@@ -298,13 +311,28 @@ def _start_agent_runtime_server(
         import os
         os.environ['CODEAI_DEBUG'] = '1'
     
+    # Shared value so the child process can report the effective port
+    port_value = multiprocessing.Value('i', 0)
+
     process = multiprocessing.Process(
         target=_run_agent_runtime_server,
-        args=(host, actual_port, agent_id, codemode, protocol),
+        args=(host, port, agent_id, codemode, protocol, port_value),
         daemon=True
     )
     process.start()
     
+    # Wait for the child to resolve the port (happens before uvicorn.run)
+    timeout = 10.0
+    start = time.time()
+    while port_value.value == 0 and time.time() - start < timeout:
+        if not process.is_alive():
+            break
+        time.sleep(0.05)
+    
+    actual_port = port_value.value
+    if actual_port == 0:
+        raise RuntimeError("Agent runtime failed to resolve a port")
+
     return process, actual_port
 
 
@@ -445,6 +473,18 @@ def _pick_agentspec_interactive() -> str:
             if len(desc_line) > 70:
                 desc_line = desc_line[:67] + "..."
             print(f"       {GRAY}{desc_line}{RESET}")
+        # Show required env vars with availability status
+        env_vars: set[str] = set()
+        for mcp in spec.mcp_servers:
+            env_vars.update(mcp.required_env_vars)
+        if env_vars:
+            env_parts: list[str] = []
+            for var in sorted(env_vars):
+                if os.environ.get(var):
+                    env_parts.append(f"{GREEN_LIGHT}{var}{RESET}")
+                else:
+                    env_parts.append(f"{RED}{var}{RESET}")
+            print(f"       {' '.join(env_parts)}")
     
     default_display = f" [{default_idx + 1}]" if default_idx is not None else ""
     print()
@@ -490,10 +530,10 @@ def main_callback(
         help="Agent spec ID to start from the agent-runtimes library"
     ),
     port: int = typer.Option(
-        8000,
+        0,
         "--port",
         "-p",
-        help="Port for the agent-runtimes server (will find free port if taken)"
+        help="Port for the agent-runtimes server (0 = auto-select random free port)"
     ),
     banner: bool = typer.Option(
         False,
@@ -649,13 +689,29 @@ def main_callback(
                 print(_format_startup_info("127.0.0.1", actual_port, startup_info))
                 print()
 
+                # Extract Jupyter URL for the /jupyter slash command
+                jupyter_url = None
+                if startup_info:
+                    sandbox_info = startup_info.get("sandbox", {})
+                    jupyter_url = sandbox_info.get("jupyter_url")
+                    if not jupyter_url:
+                        jh = sandbox_info.get("jupyter_host")
+                        jp = sandbox_info.get("jupyter_port")
+                        if jh and jp:
+                            jupyter_url = f"http://{jh}:{jp}"
+                    # Append token as query param so the browser can authenticate
+                    if jupyter_url:
+                        jupyter_token = sandbox_info.get("jupyter_token")
+                        if jupyter_token:
+                            jupyter_url = f"{jupyter_url}?token={jupyter_token}"
+
                 url = f"http://127.0.0.1:{actual_port}/api/v1/ag-ui/codeai/"
                 server_url = f"http://127.0.0.1:{actual_port}"
                 
                 try:
                     # Use Rich-based TUX
                     from .tux import run_tux
-                    asyncio.run(run_tux(url, server_url, agent_id="codeai", eggs=eggs))
+                    asyncio.run(run_tux(url, server_url, agent_id="codeai", eggs=eggs, jupyter_url=jupyter_url))
                 finally:
                     _cleanup_subprocess()
             else:
@@ -667,7 +723,7 @@ def main_callback(
         raise
     except KeyboardInterrupt:
         _cleanup_subprocess()
-        print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI! Goodbye!{RESET}")
+        print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI. Bye!{RESET}")
         print(f"   {GRAY}\033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{RESET}")
         print()
         raise typer.Exit(0)
@@ -834,7 +890,7 @@ async def _remote_chat_loop_acp(url: str) -> None:
                         continue
                     
                     if user_input.lower() in ("quit", "exit", "q"):
-                        print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI! Goodbye!{RESET}")
+                        print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI. Bye!{RESET}")
                         print(f"   {GRAY}\033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{RESET}")
                         print()
                         break
@@ -869,7 +925,7 @@ async def _remote_chat_loop_acp(url: str) -> None:
                     print()
                     
                 except KeyboardInterrupt:
-                    print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI! Goodbye!{RESET}")
+                    print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI. Bye!{RESET}")
                     print(f"   {GRAY}\033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{RESET}")
                     print()
                     break
@@ -902,7 +958,7 @@ async def _remote_chat_loop_ag_ui(url: str) -> None:
                         continue
                     
                     if user_input.lower() in ("quit", "exit", "q"):
-                        print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI! Goodbye!{RESET}")
+                        print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI. Bye!{RESET}")
                         print(f"   {GRAY}\033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{RESET}")
                         print()
                         break
@@ -938,7 +994,7 @@ async def _remote_chat_loop_ag_ui(url: str) -> None:
                     print()
                     
                 except KeyboardInterrupt:
-                    print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI! Goodbye!{RESET}")
+                    print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI. Bye!{RESET}")
                     print(f"   {GRAY}\033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{RESET}")
                     print()
                     break

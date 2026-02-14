@@ -178,6 +178,7 @@ class CodeAITux:
         server_url: str = "http://127.0.0.1:8000",
         agent_id: str = "codeai",
         eggs: bool = False,
+        jupyter_url: Optional[str] = None,
     ):
         """Initialize the TUX.
         
@@ -186,11 +187,13 @@ class CodeAITux:
             server_url: Base URL of the agent-runtimes server
             agent_id: Agent ID for API calls
             eggs: Enable Easter egg commands
+            jupyter_url: Jupyter server URL (only set when sandbox is jupyter)
         """
         self.agent_url = agent_url
         self.server_url = server_url.rstrip("/")
         self.agent_id = agent_id
         self.eggs = eggs
+        self.jupyter_url = jupyter_url
         self.console = Console()
         self.stats = SessionStats()
         self.running = False
@@ -334,6 +337,17 @@ class CodeAITux:
                 ),
             ])
         
+        # Add /jupyter command only when a Jupyter sandbox is active
+        if self.jupyter_url:
+            commands.append(
+                SlashCommand(
+                    name="jupyter",
+                    description="Open the Jupyter server in your browser",
+                    handler=self._cmd_jupyter,
+                    shortcut="escape j",  # Esc, J
+                ),
+            )
+
         for cmd in commands:
             self.commands[cmd.name] = cmd
             for alias in cmd.aliases:
@@ -511,6 +525,20 @@ class CodeAITux:
         """Clear the screen."""
         self.console.clear()
 
+    async def _cmd_jupyter(self) -> None:
+        """Open the Jupyter server API page in the default browser."""
+        import webbrowser
+        if self.jupyter_url:
+            # Append /api so the browser lands on the Jupyter REST API root
+            sep = "&" if "?" in self.jupyter_url else "?"
+            base = self.jupyter_url.split("?")[0].rstrip("/") + "/api"
+            query = self.jupyter_url.split("?")[1] if "?" in self.jupyter_url else None
+            url = f"{base}?{query}" if query else base
+            self.console.print(f"  Opening [bold cyan]{url}[/bold cyan]")
+            webbrowser.open(url)
+        else:
+            self.console.print("  [yellow]No Jupyter server available.[/yellow]")
+
     async def _cmd_clear(self) -> None:
         """Clear conversation history."""
         try:
@@ -622,7 +650,7 @@ class CodeAITux:
             self._agui_client = None
         
         self.console.print()
-        self.console.print("✨ Thank you for using Code AI! Goodbye!", style=STYLE_ACCENT)
+        self.console.print("✨ Thank you for using Code AI. Bye!", style=STYLE_ACCENT)
         self.console.print("   [link=https://datalayer.ai]https://datalayer.ai[/link]", style=STYLE_MUTED)
         self.console.print()
     
@@ -1198,6 +1226,7 @@ async def run_tux(
     server_url: str = "http://127.0.0.1:8000",
     agent_id: str = "codeai",
     eggs: bool = False,
+    jupyter_url: Optional[str] = None,
 ) -> None:
     """Run the Code AI TUX.
     
@@ -1206,6 +1235,7 @@ async def run_tux(
         server_url: Base URL of the agent-runtimes server
         agent_id: Agent ID for API calls
         eggs: Enable Easter egg commands
+        jupyter_url: Jupyter server URL (only set when sandbox is jupyter)
     """
-    tux = CodeAITux(agent_url, server_url, agent_id, eggs=eggs)
+    tux = CodeAITux(agent_url, server_url, agent_id, eggs=eggs, jupyter_url=jupyter_url)
     await tux.run()
