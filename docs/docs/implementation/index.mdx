@@ -1,0 +1,165 @@
+---
+title: Implementation
+---
+
+# Implementation
+
+Code AI is built on [Pydantic AI](https://ai.pydantic.dev) and the [Agent Runtimes](https://github.com/datalayer/codeai) platform. This page covers the architecture, key components, and design decisions.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    Code AI CLI                       │
+│                                                     │
+│  ┌──────────┐  ┌──────────┐  ┌───────────────────┐ │
+│  │  Typer   │  │  Banner  │  │   Animations      │ │
+│  │  (cli.py)│  │  & Colors│  │   (rain, about,   │ │
+│  │          │  │          │  │    gif)            │ │
+│  └────┬─────┘  └──────────┘  └───────────────────┘ │
+│       │                                             │
+│  ┌────▼──────────────────────────────────────────┐  │
+│  │           Terminal UX (tux.py)                 │  │
+│  │  • Rich console rendering                     │  │
+│  │  • Slash commands (/help, /tools, /status)     │  │
+│  │  • Keyboard shortcuts (Esc sequences)          │  │
+│  │  • Context visualization                       │  │
+│  │  • Token tracking & session stats              │  │
+│  └────┬──────────────────────────────────────────┘  │
+│       │                                             │
+│  ┌────▼──────────────────────────────────────────┐  │
+│  │           AG-UI / ACP Clients                 │  │
+│  │  (from codeai SDK)                    │  │
+│  └────┬──────────────────────────────────────────┘  │
+└───────┼─────────────────────────────────────────────┘
+        │  HTTP/SSE or WebSocket
+┌───────▼─────────────────────────────────────────────┐
+│              Agent Runtimes Server                   │
+│  • Pydantic AI agent with tools                     │
+│  • MCP server integration                           │
+│  • Codemode (programmatic tool execution)           │
+│  • Model routing (Bedrock, OpenAI, etc.)            │
+└─────────────────────────────────────────────────────┘
+```
+
+## Key Components
+
+### CLI Entry Point (`cli.py`)
+
+The CLI is built with [Typer](https://typer.tiangolo.com/) and supports two modes:
+
+- **Interactive mode** — launches the TUX (Terminal UX) with a background codeai server
+- **Single-query mode** — sends one query and exits
+
+The CLI automatically starts an codeai server as a background subprocess, waits for it to become healthy, then connects via the AG-UI protocol.
+
+```bash
+# Interactive mode (default)
+codeai
+
+# Interactive with specific agent spec
+codeai --agent-id data-acquisition
+
+# Single query
+codeai "How do I create a pandas DataFrame?"
+```
+
+### Terminal UX (`tux.py`)
+
+The `CodeAITux` class provides a Claude Code-inspired terminal interface built with [Rich](https://github.com/Textualize/rich) and [prompt_toolkit](https://python-prompt-toolkit.readthedocs.io/).
+
+**Features:**
+- Side-by-side welcome panel with logo, tips, and version info
+- Slash command system with tab completion and Escape-key shortcuts
+- Streaming response rendering with Rich Markdown
+- Tool call visualization (collapsible tool call details)
+- Context usage grid visualization
+- Session token tracking (input, output, total)
+
+### Agent Runtime Server
+
+When launched, Code AI starts an embedded [codeai](https://github.com/datalayer/codeai) server in a child process. The server hosts a Pydantic AI agent configured from an **agent spec** and exposes it via AG-UI (HTTP/SSE).
+
+Key server features:
+- **MCP server integration** — agent specs can declare MCP servers (e.g., Tavily for search)
+- **Codemode** — converts MCP tools into programmatic tools the LLM can use for code execution
+- **Model selection** — routes to providers like AWS Bedrock, OpenAI, or Anthropic
+
+### Banner & Animations (`banner.py`, `animations/`)
+
+The branding layer uses Datalayer brand colors (True Color ANSI) and includes:
+- ASCII art banner with box-drawing characters
+- Matrix-style digital rain animation
+- Black hole / spinning GIF animation (using Pillow for ANSI rendering)
+- About screen animation
+
+## Slash Commands
+
+All slash commands are registered in `CodeAITux._register_commands()`:
+
+| Command | Shortcut | Description |
+|---------|----------|-------------|
+| `/help` | `Esc H` | Show available commands |
+| `/status` | `Esc S` | Show model, tokens, and connectivity |
+| `/context` | `Esc X` | Visualize context usage as a colored grid |
+| `/clear` | `Esc C` | Clear conversation history |
+| `/tools` | `Esc T` | List available tools |
+| `/mcp-servers` | `Esc M` | List MCP servers and their status |
+| `/skills` | `Esc K` | List available skills |
+| `/codemode-toggle` | `Esc O` | Toggle codemode on/off |
+| `/agents` | `Esc A` | List available agents on the server |
+| `/tools-last` | `Esc L` | Show tool calls from last response |
+| `/context-export` | `Esc E` | Export context to CSV |
+| `/exit` | `Esc Q` | Exit Code AI |
+
+Easter egg commands (enabled with `--eggs`): `/rain`, `/about`, `/gif`.
+
+## Spinner Animation
+
+Code AI uses an animated loading spinner while waiting for LLM responses. The default style is a **growing circle** ("pulsing" effect):
+
+```
+○ → ◔ → ◑ → ◕ → ● → ◕ → ◑ → ◔ → (repeat)
+```
+
+The spinner runs in a background daemon thread at 100ms per frame and is TTY-aware (disabled when output is piped). Five styles are available: `growing` (default), `circle`, `dots`, `bounce`, and `pulse`.
+
+```python
+# Context manager usage
+with Spinner("Processing", style="growing"):
+    result = do_long_operation()
+```
+
+In interactive mode, the TUX uses Rich's built-in `Spinner` for server startup and a streaming renderer for agent responses.
+
+## Protocol Clients
+
+Code AI communicates with the agent server through two protocol clients (from the `codeai` SDK):
+
+### AG-UI (HTTP/SSE) — Primary
+
+The `AGUIClient` sends queries over HTTP and receives a stream of Server-Sent Events. Event types include `TEXT_MESSAGE_CONTENT` (streaming text deltas), `TOOL_CALL_START/END` (tool execution), and `RUN_FINISHED/RUN_ERROR`.
+
+### ACP (WebSocket) — Alternative
+
+The `ACPClient` connects via WebSocket for bidirectional communication. Used with the `codeai connect` subcommand for connecting to remote agent servers.
+
+## Subprocess Management
+
+The embedded server runs in a `multiprocessing.Process` with careful lifecycle management:
+- `atexit` handler for clean shutdown
+- `SIGINT`/`SIGTERM`/`SIGTSTP` signal handlers
+- Graceful termination with timeout, then forced kill
+- Port conflict detection with automatic free-port discovery
+
+## Brand Colors
+
+All terminal output uses Datalayer brand colors via True Color (24-bit) ANSI escape codes:
+
+| Color | Hex | Usage |
+|-------|-----|-------|
+| Green brand | `#16A085` | Borders, headings, secondary accent |
+| Green accent | `#1ABC9C` | Primary accent, spinner, highlights |
+| Green bright | `#2ECC71` | Success messages, glow effects |
+| Gray | `#59595C` | Muted text, metadata, hints |
+| White | `#FFFFFF` | Primary text on dark backgrounds |

@@ -1,0 +1,163 @@
+---
+title: CLI
+---
+
+# CLI
+
+Code AI provides a command-line interface built with [Typer](https://typer.tiangolo.com/). Run `codeai --help` for the full option list.
+
+## Installation
+
+### Via pip
+
+```bash
+pip install codeai
+```
+
+### From source
+
+```bash
+git clone https://github.com/datalayer/codeai.git
+cd codeai
+pip install -e .
+```
+
+### Quick install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/datalayer/codeai/main/install.sh | bash
+```
+
+## Interactive Mode
+
+Launch without arguments to start an interactive session with a background codeai server:
+
+```bash
+codeai
+```
+
+The TUX (Terminal UX) displays a welcome panel and accepts free-form queries or slash commands. Type `/` to see the autocomplete menu.
+
+### Agent Selection
+
+Use `--agent-id` to pick a preconfigured agent spec from the [agentspecs catalogue](https://github.com/datalayer/agentspecs):
+
+```bash
+# Default agent
+codeai
+
+# Specific agent
+codeai --agent-id crawler
+
+# With codemode disabled
+codeai --agent-id data-acquisition --no-codemode
+```
+
+:::tip
+Make sure the required environment variables for the agent's MCP servers and skills are set before launching. Check the agent spec in the [agentspecs repository](https://github.com/datalayer/agentspecs/tree/main/agentspecs/agents).
+:::
+
+### Slash Commands
+
+| Command | Shortcut | Description |
+|---------|----------|-------------|
+| `/help` | `Esc H` | Show available commands |
+| `/status` | `Esc S` | Model, tokens, and connectivity |
+| `/context` | `Esc X` | Visualize context usage grid |
+| `/clear` | `Esc C` | Clear conversation history |
+| `/tools` | `Esc T` | List available tools |
+| `/mcp-servers` | `Esc M` | List MCP servers |
+| `/skills` | `Esc K` | List available skills |
+| `/codemode-toggle` | `Esc O` | Toggle codemode on/off |
+| `/agents` | `Esc A` | List agents on the server |
+| `/tools-last` | `Esc L` | Show tool calls from last response |
+| `/context-export` | `Esc E` | Export context to CSV |
+| `/exit` | `Esc Q` | Exit Code AI |
+
+### Banner & Animations
+
+```bash
+# Show banner with Matrix rain animation
+codeai --banner
+
+# Show banner with Matrix rain and black hole animation
+codeai --banner-all
+
+# Easter egg commands (/rain, /about, /gif)
+codeai --eggs
+```
+
+## Single-Query Mode
+
+Pass a query as arguments for one-shot execution:
+
+```bash
+codeai "What is Python?"
+
+codeai -a crawler "Search for AI trends"
+```
+
+The CLI starts the agent server, sends the query, prints the response, and exits.
+
+## Connect to a Remote Server
+
+Use `codeai connect` to attach to an already-running codeai server:
+
+```bash
+# AG-UI (HTTP/SSE) — default
+codeai connect http://localhost:8000/api/v1/ag-ui/my-agent/
+
+# ACP (WebSocket)
+codeai connect ws://localhost:8000/api/v1/acp/ws/my-agent -t acp
+
+# Remote server
+codeai connect https://agent.datalayer.ai/api/v1/ag-ui/codeai-agent/
+```
+
+## List Remote Agents
+
+```bash
+codeai agents
+codeai agents --server https://agents.datalayer.ai
+```
+
+## Options Reference
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--agent-id` | `-a` | `data-acquisition` | Agent spec ID to start |
+| `--port` | `-p` | `8000` | Server port (finds free port if taken) |
+| `--banner` | `-b` | off | Show Matrix rain animation |
+| `--banner-all` | `-B` | off | Show Matrix rain + black hole animations |
+| `--debug` | `-d` | off | Verbose logging |
+| `--no-codemode` | | off | Disable codemode |
+| `--eggs` | | off | Enable Easter egg slash commands |
+| `--version` | `-v` | | Show version info |
+
+## Programmatic Usage
+
+Import the Pydantic AI agent directly for custom tooling:
+
+```python
+from codeai.cli import agent
+
+@agent.tool()
+def my_custom_tool(data: str) -> str:
+    """Custom tool description."""
+    return f"Processed: {data}"
+
+agent.to_cli_sync()
+```
+
+Or launch the TUX programmatically:
+
+```python
+import asyncio
+from codeai.tux import run_tux
+
+asyncio.run(run_tux(
+    agent_url="http://127.0.0.1:8000/api/v1/ag-ui/codeai/",
+    server_url="http://127.0.0.1:8000",
+    agent_id="codeai",
+))
+```

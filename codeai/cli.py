@@ -333,6 +333,59 @@ def _wait_for_server(host: str, port: int, timeout: float = 30.0) -> bool:
     return False
 
 
+def _pick_agentspec_interactive() -> str:
+    """Show available agent specs and let the user pick one interactively.
+    
+    Returns:
+        The chosen agent spec ID.
+    """
+    from agent_runtimes.config.agents import list_agent_specs
+    
+    specs = list_agent_specs()
+    if not specs:
+        print(f"{GREEN_DARK}[ERROR]{RESET} No agent specs found", file=sys.stderr)
+        raise typer.Exit(1)
+    
+    # Sort by id for stable ordering
+    specs = sorted(specs, key=lambda s: s.id)
+    
+    print(f"\n{GREEN_LIGHT}Available Agent Specs:{RESET}\n")
+    for i, spec in enumerate(specs, 1):
+        tags = f" {GRAY}[{', '.join(spec.tags)}]{RESET}" if spec.tags else ""
+        enabled = f" {GREEN_MEDIUM}●{RESET}" if spec.enabled else f" {GRAY}○{RESET}"
+        print(f"  {GREEN_MEDIUM}{i:>3}.{RESET}{enabled} {WHITE}{spec.id}{RESET}")
+        if spec.description:
+            # Show first line of description, truncated
+            desc_line = spec.description.strip().split('\n')[0]
+            if len(desc_line) > 70:
+                desc_line = desc_line[:67] + "..."
+            print(f"       {GRAY}{desc_line}{RESET}")
+    
+    print()
+    while True:
+        try:
+            choice = input(f"{GREEN_MEDIUM}Choose an agent spec [1-{len(specs)}]: {RESET}").strip()
+            if not choice:
+                continue
+            idx = int(choice) - 1
+            if 0 <= idx < len(specs):
+                chosen = specs[idx]
+                print(f"\n{GREEN_LIGHT}Selected:{RESET} {chosen.id}\n")
+                return chosen.id
+            else:
+                print(f"{GRAY}Please enter a number between 1 and {len(specs)}{RESET}")
+        except ValueError:
+            # Allow typing the spec ID directly
+            matching = [s for s in specs if s.id == choice]
+            if matching:
+                print(f"\n{GREEN_LIGHT}Selected:{RESET} {matching[0].id}\n")
+                return matching[0].id
+            print(f"{GRAY}Invalid input. Enter a number or a valid agent spec ID.{RESET}")
+        except (KeyboardInterrupt, EOFError):
+            print()
+            raise typer.Exit(0)
+
+
 @app.callback(invoke_without_command=True)
 def main_callback(
     ctx: typer.Context,
@@ -340,9 +393,9 @@ def main_callback(
         None,
         help="Query to send to the AI agent. If not provided, starts interactive mode."
     ),
-    agent_id: Optional[str] = typer.Option(
-        "data-acquisition",
-        "--agent-id",
+    agentspec_id: Optional[str] = typer.Option(
+        None,
+        "--agentspec-id",
         "-a",
         help="Agent spec ID to start from the agent-runtimes library"
     ),
@@ -393,15 +446,18 @@ def main_callback(
     Run without arguments to start interactive chat mode with slash commands.
     Provide a query as arguments for single-shot mode.
     
+    If no --agentspec-id is given, lists available agent specs and prompts
+    you to choose one interactively.
+    
     Examples:
     
-        codeai                          # Interactive mode with slash commands
+        codeai                                    # Pick agent spec interactively
         
-        codeai --agent-id crawler       # Interactive mode with crawler agent
+        codeai --agentspec-id crawler              # Use specific agent spec
         
-        codeai "What is Python?"        # Single query mode
+        codeai "What is Python?"                   # Single query mode
         
-        codeai -a crawler "Search for AI trends"  # Single query with specific agent
+        codeai -a crawler "Search for AI trends"   # Single query with specific agent
     """
     # If a subcommand was invoked, don't run the default behavior
     if ctx.invoked_subcommand is not None:
@@ -412,6 +468,11 @@ def main_callback(
         raise typer.Exit(0)
     
     global _subprocess_ref
+    
+    # Resolve agent spec: use provided ID or pick interactively
+    agent_id = agentspec_id
+    if agent_id is None:
+        agent_id = _pick_agentspec_interactive()
     
     try:
         if query:
