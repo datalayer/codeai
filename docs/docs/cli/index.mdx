@@ -40,17 +40,38 @@ The TUX (Terminal UX) displays a welcome panel and accepts free-form queries or 
 
 ### Agent Selection
 
-Use `--agent-id` to pick a preconfigured agent spec from the [agentspecs catalogue](https://github.com/datalayer/agentspecs):
+When started without `--agentspec-id`, Code AI lists all available agent specs and lets you pick one interactively:
+
+```
+$ codeai
+
+Available Agent Specs:
+
+    1. ● crawler
+         Search and crawl web resources
+    2. ● data-acquisition
+         Acquire and process datasets
+    3. ● simple
+         General-purpose assistant
+
+Choose an agent spec [1-3]: 2
+
+Selected: data-acquisition
+```
+
+You can also type the spec ID directly instead of a number.
+
+To skip the picker, pass `--agentspec-id` (or `-a`):
 
 ```bash
-# Default agent
-codeai
-
 # Specific agent
-codeai --agent-id crawler
+codeai --agentspec-id crawler
+
+# Short form
+codeai -a data-acquisition
 
 # With codemode disabled
-codeai --agent-id data-acquisition --no-codemode
+codeai --agentspec-id data-acquisition --no-codemode
 ```
 
 :::tip
@@ -95,6 +116,8 @@ Pass a query as arguments for one-shot execution:
 codeai "What is Python?"
 
 codeai -a crawler "Search for AI trends"
+
+codeai --agentspec-id data-acquisition "Fetch the latest dataset"
 ```
 
 The CLI starts the agent server, sends the query, prints the response, and exits.
@@ -125,7 +148,7 @@ codeai agents --server https://agents.datalayer.ai
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
-| `--agent-id` | `-a` | `data-acquisition` | Agent spec ID to start |
+| `--agentspec-id` | `-a` | *(interactive picker)* | Agent spec ID to start |
 | `--port` | `-p` | `8000` | Server port (finds free port if taken) |
 | `--banner` | `-b` | off | Show Matrix rain animation |
 | `--banner-all` | `-B` | off | Show Matrix rain + black hole animations |

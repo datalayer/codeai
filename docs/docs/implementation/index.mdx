@@ -51,14 +51,16 @@ The CLI is built with [Typer](https://typer.tiangolo.com/) and supports two mode
 - **Interactive mode** — launches the TUX (Terminal UX) with a background codeai server
 - **Single-query mode** — sends one query and exits
 
-The CLI automatically starts an codeai server as a background subprocess, waits for it to become healthy, then connects via the AG-UI protocol.
+When no `--agentspec-id` is provided, the CLI presents an interactive picker that lists all available agent specs from the [agentspecs](https://github.com/datalayer/agentspecs) catalogue and lets the user choose one by number or ID.
+
+The CLI then starts an codeai server as a background subprocess, waits for it to become healthy, and connects via the AG-UI protocol.
 
 ```bash
-# Interactive mode (default)
+# Interactive mode — pick agent spec interactively
 codeai
 
 # Interactive with specific agent spec
-codeai --agent-id data-acquisition
+codeai --agentspec-id data-acquisition
 
 # Single query
 codeai "How do I create a pandas DataFrame?"
