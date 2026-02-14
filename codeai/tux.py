@@ -348,6 +348,16 @@ class CodeAITux:
                 ),
             )
 
+        # /agent opens the web-based chat UI served by the agent-runtimes server
+        commands.append(
+            SlashCommand(
+                name="agent",
+                description="Open the Agent chat UI in your browser",
+                handler=self._cmd_agent,
+                shortcut="escape w",  # Esc, W (web)
+            ),
+        )
+
         for cmd in commands:
             self.commands[cmd.name] = cmd
             for alias in cmd.aliases:
@@ -538,6 +548,13 @@ class CodeAITux:
             webbrowser.open(url)
         else:
             self.console.print("  [yellow]No Jupyter server available.[/yellow]")
+
+    async def _cmd_agent(self) -> None:
+        """Open the Agent chat web UI in the default browser."""
+        import webbrowser
+        url = f"{self.server_url}/static/agent.html?agent={self.agent_id}"
+        self.console.print(f"  Opening [bold cyan]{url}[/bold cyan]")
+        webbrowser.open(url)
 
     async def _cmd_clear(self) -> None:
         """Clear conversation history."""
