@@ -154,9 +154,11 @@ class Spinner:
         self.stop()
 
 
+from agent_runtimes.config.models import DEFAULT_MODEL
+
 # Define the Code AI agent with instructions
 agent = Agent(
-    'bedrock:us.anthropic.claude-sonnet-4-5-20250514-v1:0',
+    DEFAULT_MODEL.value,
     instructions="""You are Code AI, a helpful AI assistant specialized in code analysis, 
     Jupyter notebooks, and data science workflows. You help users with:
     - Writing and debugging code
@@ -541,7 +543,7 @@ def main_callback(
                     _subprocess_ref = process  # Register for cleanup
                     
                     # Update status while waiting with more visible styling
-                    live.update(Spinner("dots", text=f"[bold cyan]Waiting for agent runtime on port {actual_port}...[/bold cyan]", style="cyan"))
+                    live.update(Spinner("dots", text=f"[bold cyan]Waiting for agent runtime '{agent_id}' on port {actual_port}...[/bold cyan]", style="cyan"))
                     
                     # Wait for server to be ready
                     if not _wait_for_server("127.0.0.1", actual_port, timeout=60.0):
