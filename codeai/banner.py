@@ -55,7 +55,7 @@ BANNER = f"""
 ║   {GREEN_LIGHT}░█░░░█░█░█░█░█▀▀░█▀█░░█░  {WHITE}Cheaper • Faster • Collaborative  {GREEN_DARK}║
 ║   {GREEN_LIGHT}░▀▀▀░▀▀▀░▀▀░░▀▀▀░▀░▀░▀▀▀  {GREEN_DARK}                                  {GREEN_DARK}║
 ║                                                               ║
-║   {GREEN_DARK}✨ Data Analysis  {GREEN_MEDIUM}📊 Data Science  {GREEN_LIGHT}📓 Jupyter               {GREEN_DARK}║
+║   {GREEN_DARK}✨ Data Analysis  {GREEN_MEDIUM}📊 Data Science  {GREEN_LIGHT}📓 Software Development  {GREEN_DARK}║
 ║                                                               ║
 ║   {GRAY}Type /exit to quit  •  Type / for commands                  {GREEN_DARK}║
 ╚═══════════════════════════════════════════════════════════════╝{RESET}

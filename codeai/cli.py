@@ -338,6 +338,8 @@ def _wait_for_server(host: str, port: int, timeout: float = 30.0) -> bool:
 def _pick_agentspec_interactive() -> str:
     """Show available agent specs and let the user pick one interactively.
     
+    The first enabled agent spec is proposed as the default (press Enter to select it).
+    
     Returns:
         The chosen agent spec ID.
     """
@@ -348,14 +350,22 @@ def _pick_agentspec_interactive() -> str:
         print(f"{GREEN_DARK}[ERROR]{RESET} No agent specs found", file=sys.stderr)
         raise typer.Exit(1)
     
-    # Sort by id for stable ordering
-    specs = sorted(specs, key=lambda s: s.id)
+    # Sort: enabled specs first, then by id for stable ordering
+    specs = sorted(specs, key=lambda s: (not s.enabled, s.id))
+    
+    # Find the first enabled spec to use as default
+    default_idx: Optional[int] = None
+    for i, spec in enumerate(specs):
+        if spec.enabled:
+            default_idx = i
+            break
     
     print(f"\n{GREEN_LIGHT}Available Agent Specs:{RESET}\n")
     for i, spec in enumerate(specs, 1):
         tags = f" {GRAY}[{', '.join(spec.tags)}]{RESET}" if spec.tags else ""
         enabled = f" {GREEN_MEDIUM}●{RESET}" if spec.enabled else f" {GRAY}○{RESET}"
-        print(f"  {GREEN_MEDIUM}{i:>3}.{RESET}{enabled} {WHITE}{spec.id}{RESET}")
+        default_marker = f" {GREEN_LIGHT}(default){RESET}" if (i - 1) == default_idx else ""
+        print(f"  {GREEN_MEDIUM}{i:>3}.{RESET}{enabled} {WHITE}{spec.id}{RESET}{default_marker}")
         if spec.description:
             # Show first line of description, truncated
             desc_line = spec.description.strip().split('\n')[0]
@@ -363,11 +373,16 @@ def _pick_agentspec_interactive() -> str:
                 desc_line = desc_line[:67] + "..."
             print(f"       {GRAY}{desc_line}{RESET}")
     
+    default_display = f" [{default_idx + 1}]" if default_idx is not None else ""
     print()
     while True:
         try:
-            choice = input(f"{GREEN_MEDIUM}Choose an agent spec [1-{len(specs)}]: {RESET}").strip()
+            choice = input(f"{GREEN_MEDIUM}Choose an agent spec [1-{len(specs)}]{default_display}: {RESET}").strip()
             if not choice:
+                if default_idx is not None:
+                    chosen = specs[default_idx]
+                    print(f"\n{GREEN_LIGHT}Selected:{RESET} {chosen.id}\n")
+                    return chosen.id
                 continue
             idx = int(choice) - 1
             if 0 <= idx < len(specs):
@@ -471,6 +486,15 @@ def main_callback(
     
     global _subprocess_ref
     
+    # Show ASCII banner early (before agent selection)
+    from .banner import show_banner, BANNER, DIM, RESET as BANNER_RESET
+    if banner or banner_all:
+        show_banner(splash=banner, splash_all=banner_all)
+    else:
+        if sys.stdout.isatty():
+            print(BANNER)
+            print(f"{DIM}Powered by Datalayer  •  \033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{BANNER_RESET}\n")
+    
     # Resolve agent spec: use provided ID or pick interactively
     agent_id = agentspec_id
     if agent_id is None:
@@ -516,18 +540,6 @@ def main_callback(
                 from rich.console import Console
                 from rich.spinner import Spinner
                 from rich.live import Live
-                
-                # Show ASCII banner first (always show it)
-                from .banner import show_banner, BANNER, DIM, RESET as BANNER_RESET
-                
-                # Show animated banner if requested, otherwise just static banner
-                if banner or banner_all:
-                    show_banner(splash=banner, splash_all=banner_all)
-                else:
-                    # Just show static banner
-                    if sys.stdout.isatty():
-                        print(BANNER)
-                        print(f"{DIM}Powered by Datalayer  •  \033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{BANNER_RESET}\n")
                 
                 # Show starting message with spinner
                 console = Console()
