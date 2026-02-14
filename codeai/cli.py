@@ -154,7 +154,7 @@ class Spinner:
         self.stop()
 
 
-from agent_runtimes.config.models import DEFAULT_MODEL
+from agent_runtimes.specs.models import DEFAULT_MODEL
 
 # Define the Code AI agent with instructions
 agent = Agent(
@@ -212,7 +212,7 @@ def _run_agent_runtime_server(host: str, port: int, agent_id: str, codemode: boo
     import sys
     import os
     from agent_runtimes.commands import serve_server
-    from agent_runtimes.config.agents import get_agent_spec
+    from agent_runtimes.specs.agents import get_agent_spec
     
     # Only suppress logging if not in debug mode
     debug_mode = os.environ.get('CODEAI_DEBUG') == '1'
@@ -252,6 +252,7 @@ def _run_agent_runtime_server(host: str, port: int, agent_id: str, codemode: boo
         no_config_mcp_servers=True,  # Disable config MCP servers
         mcp_servers=mcp_servers_str,  # Use MCP servers from agent spec
         codemode=codemode,  # Enable/disable codemode based on flag
+        sandbox_variant="jupyter" if codemode else None,
         protocol=protocol,
     )
 
@@ -335,6 +336,78 @@ def _wait_for_server(host: str, port: int, timeout: float = 30.0) -> bool:
     return False
 
 
+def _fetch_startup_info(host: str, port: int) -> dict | None:
+    """Fetch startup info from the running agent-runtimes server.
+    
+    Args:
+        host: Server host
+        port: Server port
+        
+    Returns:
+        The startup info dict, or None on failure.
+    """
+    import httpx
+
+    url = f"http://{host}:{port}/health/startup"
+    try:
+        response = httpx.get(url, timeout=3.0)
+        if response.status_code == 200:
+            return response.json()
+    except Exception:
+        pass
+    return None
+
+
+def _format_startup_info(host: str, port: int, info: dict | None) -> str:
+    """Format startup info for CLI display.
+    
+    Args:
+        host: Runtime server host
+        port: Runtime server port
+        info: The startup info dict from /health/startup
+        
+    Returns:
+        Formatted string ready for terminal output.
+    """
+    lines: list[str] = []
+
+    lines.append(f"  {GREEN_MEDIUM}Runtime{RESET}  http://{host}:{port}")
+
+    if info:
+        agent_info = info.get("agent", {})
+        sandbox_info = info.get("sandbox", {})
+
+        if agent_info.get("protocol"):
+            lines.append(f"  {GREEN_MEDIUM}Protocol{RESET} {agent_info['protocol']}")
+        if agent_info.get("model"):
+            lines.append(f"  {GREEN_MEDIUM}Model{RESET}    {agent_info['model']}")
+        if agent_info.get("codemode"):
+            lines.append(f"  {GREEN_MEDIUM}Codemode{RESET} enabled")
+
+        variant = sandbox_info.get("variant")
+        if variant:
+            sandbox_line = f"  {GREEN_MEDIUM}Sandbox{RESET}  {variant}"
+            jupyter_url = sandbox_info.get("jupyter_url")
+            if jupyter_url:
+                sandbox_line += f"  {GRAY}({jupyter_url}){RESET}"
+            else:
+                jupyter_host = sandbox_info.get("jupyter_host")
+                jupyter_port = sandbox_info.get("jupyter_port")
+                if jupyter_host and jupyter_port:
+                    sandbox_line += f"  {GRAY}({jupyter_host}:{jupyter_port}){RESET}"
+            lines.append(sandbox_line)
+
+        skills = agent_info.get("skills", [])
+        if skills:
+            lines.append(f"  {GREEN_MEDIUM}Skills{RESET}   {', '.join(skills)}")
+
+        mcp_servers = agent_info.get("mcp_servers", [])
+        if mcp_servers:
+            lines.append(f"  {GREEN_MEDIUM}MCP{RESET}      {', '.join(mcp_servers)}")
+
+    return "\n".join(lines)
+
+
 def _pick_agentspec_interactive() -> str:
     """Show available agent specs and let the user pick one interactively.
     
@@ -343,7 +416,7 @@ def _pick_agentspec_interactive() -> str:
     Returns:
         The chosen agent spec ID.
     """
-    from agent_runtimes.config.agents import list_agent_specs
+    from agent_runtimes.specs.agents import list_agent_specs
     
     specs = list_agent_specs()
     if not specs:
@@ -522,6 +595,11 @@ def main_callback(
                     _cleanup_subprocess()
                     raise typer.Exit(1)
                 
+                # Display startup info
+                startup_info = _fetch_startup_info("127.0.0.1", actual_port)
+                print(_format_startup_info("127.0.0.1", actual_port, startup_info))
+                print()
+                
                 # Connect to the agent and run the query
                 url = f"http://127.0.0.1:{actual_port}/api/v1/ag-ui/codeai/"
                 try:
@@ -566,6 +644,11 @@ def main_callback(
                     
                     live.update(Spinner("dots", text=f"[bold green]Agent runtime ready![/bold green]", style="green"))
                 
+                # Display startup info
+                startup_info = _fetch_startup_info("127.0.0.1", actual_port)
+                print(_format_startup_info("127.0.0.1", actual_port, startup_info))
+                print()
+
                 url = f"http://127.0.0.1:{actual_port}/api/v1/ag-ui/codeai/"
                 server_url = f"http://127.0.0.1:{actual_port}"
                 
