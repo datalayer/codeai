@@ -553,7 +553,7 @@ class CodeAITux:
     async def _cmd_browser(self) -> None:
         """Open the Agent chat web UI in the default browser."""
         import webbrowser
-        url = f"{self.server_url}/static/agent.html?agent={self.agent_id}"
+        url = f"{self.server_url}/static/agent.html?agentId={self.agent_id}"
         self.console.print(f"  Opening [bold cyan]{url}[/bold cyan]")
         webbrowser.open(url)
 
