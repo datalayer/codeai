@@ -41,6 +41,7 @@ from .banner import (
     GRAY,
     WHITE,
     RESET,
+    GOODBYE_MESSAGE,
 )
 from .animations import rain_animation, about_animation, gif_animation
 
@@ -348,12 +349,12 @@ class CodeAITux:
                 ),
             )
 
-        # /agent opens the web-based chat UI served by the agent-runtimes server
+        # /browser opens the web-based chat UI served by the agent-runtimes server
         commands.append(
             SlashCommand(
-                name="agent",
+                name="browser",
                 description="Open the Agent chat UI in your browser",
-                handler=self._cmd_agent,
+                handler=self._cmd_browser,
                 shortcut="escape w",  # Esc, W (web)
             ),
         )
@@ -549,7 +550,7 @@ class CodeAITux:
         else:
             self.console.print("  [yellow]No Jupyter server available.[/yellow]")
 
-    async def _cmd_agent(self) -> None:
+    async def _cmd_browser(self) -> None:
         """Open the Agent chat web UI in the default browser."""
         import webbrowser
         url = f"{self.server_url}/static/agent.html?agent={self.agent_id}"
@@ -667,7 +668,7 @@ class CodeAITux:
             self._agui_client = None
         
         self.console.print()
-        self.console.print("✨ Thank you for using Code AI. Bye!", style=STYLE_ACCENT)
+        self.console.print(GOODBYE_MESSAGE, style=STYLE_ACCENT)
         self.console.print("   [link=https://datalayer.ai]https://datalayer.ai[/link]", style=STYLE_MUTED)
         self.console.print()
     

@@ -83,6 +83,7 @@ from .banner import (
     DIM,
     RESET,
     BANNER,
+    GOODBYE_MESSAGE,
     show_banner,
 )
 
@@ -436,39 +437,53 @@ def _format_startup_info(host: str, port: int, info: dict | None) -> str:
     return "\n".join(lines)
 
 
+def _spec_has_valid_env(spec) -> bool:
+    """Return True when a spec is enabled and all its required env vars are set."""
+    if not spec.enabled:
+        return False
+    for mcp in spec.mcp_servers:
+        for var in mcp.required_env_vars:
+            if not os.environ.get(var):
+                return False
+    return True
+
+
 def _pick_agentspec_interactive() -> str:
     """Show available agent specs and let the user pick one interactively.
-    
-    The first enabled agent spec is proposed as the default (press Enter to select it).
-    
+
+    Specs are split into two groups:
+      ● Valid   – enabled with all required env vars present (selectable)
+      ○ Invalid – disabled or missing env vars (shown for reference, not selectable)
+
+    The first valid spec is proposed as the default (press Enter to select it).
+
     Returns:
         The chosen agent spec ID.
     """
     from agent_runtimes.specs.agents import list_agent_specs
-    
+
     specs = list_agent_specs()
     if not specs:
         print(f"{GREEN_DARK}[ERROR]{RESET} No agent specs found", file=sys.stderr)
         raise typer.Exit(1)
-    
-    # Sort: enabled specs first, then by id for stable ordering
-    specs = sorted(specs, key=lambda s: (not s.enabled, s.id))
-    
-    # Find the first enabled spec to use as default
-    default_idx: Optional[int] = None
-    for i, spec in enumerate(specs):
-        if spec.enabled:
-            default_idx = i
-            break
-    
+
+    # Partition into valid (enabled + all env vars) and the rest, each sorted by id
+    valid_specs = sorted([s for s in specs if _spec_has_valid_env(s)], key=lambda s: s.id)
+    other_specs = sorted([s for s in specs if not _spec_has_valid_env(s)], key=lambda s: s.id)
+    ordered = valid_specs + other_specs
+    valid_count = len(valid_specs)
+
+    # Default is the first valid spec (index 0) when available
+    default_idx: Optional[int] = 0 if valid_count > 0 else None
+
     print(f"\n{GREEN_LIGHT}Available Agent Specs:{RESET}\n")
-    for i, spec in enumerate(specs, 1):
-        tags = f" {GRAY}[{', '.join(spec.tags)}]{RESET}" if spec.tags else ""
-        enabled = f" {GREEN_MEDIUM}●{RESET}" if spec.enabled else f" {GRAY}○{RESET}"
+    for i, spec in enumerate(ordered, 1):
+        is_valid = i <= valid_count
+        bullet = f" {GREEN_MEDIUM}●{RESET}" if is_valid else f" {GRAY}○{RESET}"
         default_marker = f" {GREEN_LIGHT}(default){RESET}" if (i - 1) == default_idx else ""
-        print(f"  {GREEN_MEDIUM}{i:>3}.{RESET}{enabled} {WHITE}{spec.id}{RESET}{default_marker}")
+        num_color = GREEN_MEDIUM if is_valid else GRAY
+        print(f"  {num_color}{i:>3}.{RESET}{bullet} {WHITE}{spec.id}{RESET}{default_marker}")
         if spec.description:
-            # Show first line of description, truncated
             desc_line = spec.description.strip().split('\n')[0]
             if len(desc_line) > 70:
                 desc_line = desc_line[:67] + "..."
@@ -485,32 +500,45 @@ def _pick_agentspec_interactive() -> str:
                 else:
                     env_parts.append(f"{RED}{var}{RESET}")
             print(f"       {' '.join(env_parts)}")
-    
+
+    if valid_count == 0:
+        print(f"\n{RED}No valid agent specs available.{RESET}")
+        print(f"{GRAY}Enable a spec and/or set the required environment variables.{RESET}")
+        raise typer.Exit(1)
+
     default_display = f" [{default_idx + 1}]" if default_idx is not None else ""
     print()
     while True:
         try:
-            choice = input(f"{GREEN_MEDIUM}Choose an agent spec [1-{len(specs)}]{default_display}: {RESET}").strip()
+            choice = input(f"{GREEN_MEDIUM}Choose an agent spec [1-{valid_count}]{default_display}: {RESET}").strip()
             if not choice:
                 if default_idx is not None:
-                    chosen = specs[default_idx]
+                    chosen = ordered[default_idx]
                     print(f"\n{GREEN_LIGHT}Selected:{RESET} {chosen.id}\n")
                     return chosen.id
                 continue
             idx = int(choice) - 1
-            if 0 <= idx < len(specs):
-                chosen = specs[idx]
+            if 0 <= idx < valid_count:
+                chosen = ordered[idx]
                 print(f"\n{GREEN_LIGHT}Selected:{RESET} {chosen.id}\n")
                 return chosen.id
+            elif 0 <= idx < len(ordered):
+                print(f"{GRAY}Agent spec #{choice} is not available (disabled or missing env vars).{RESET}")
+                print(f"{GRAY}Please enter a number between 1 and {valid_count}.{RESET}")
             else:
-                print(f"{GRAY}Please enter a number between 1 and {len(specs)}{RESET}")
+                print(f"{GRAY}Please enter a number between 1 and {valid_count}.{RESET}")
         except ValueError:
-            # Allow typing the spec ID directly
-            matching = [s for s in specs if s.id == choice]
+            # Allow typing the spec ID directly (only valid ones)
+            matching = [s for s in valid_specs if s.id == choice]
             if matching:
                 print(f"\n{GREEN_LIGHT}Selected:{RESET} {matching[0].id}\n")
                 return matching[0].id
-            print(f"{GRAY}Invalid input. Enter a number or a valid agent spec ID.{RESET}")
+            # Check if it matches an invalid spec for a helpful message
+            invalid_match = [s for s in other_specs if s.id == choice]
+            if invalid_match:
+                print(f"{GRAY}Agent spec '{choice}' is not available (disabled or missing env vars).{RESET}")
+            else:
+                print(f"{GRAY}Invalid input. Enter a number or a valid agent spec ID.{RESET}")
         except (KeyboardInterrupt, EOFError):
             print()
             raise typer.Exit(0)
@@ -723,7 +751,7 @@ def main_callback(
         raise
     except KeyboardInterrupt:
         _cleanup_subprocess()
-        print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI. Bye!{RESET}")
+        print(f"\n{GREEN_LIGHT}{GOODBYE_MESSAGE}{RESET}")
         print(f"   {GRAY}\033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{RESET}")
         print()
         raise typer.Exit(0)
@@ -890,7 +918,7 @@ async def _remote_chat_loop_acp(url: str) -> None:
                         continue
                     
                     if user_input.lower() in ("quit", "exit", "q"):
-                        print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI. Bye!{RESET}")
+                        print(f"\n{GREEN_LIGHT}{GOODBYE_MESSAGE}{RESET}")
                         print(f"   {GRAY}\033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{RESET}")
                         print()
                         break
@@ -925,7 +953,7 @@ async def _remote_chat_loop_acp(url: str) -> None:
                     print()
                     
                 except KeyboardInterrupt:
-                    print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI. Bye!{RESET}")
+                    print(f"\n{GREEN_LIGHT}{GOODBYE_MESSAGE}{RESET}")
                     print(f"   {GRAY}\033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{RESET}")
                     print()
                     break
@@ -958,7 +986,7 @@ async def _remote_chat_loop_ag_ui(url: str) -> None:
                         continue
                     
                     if user_input.lower() in ("quit", "exit", "q"):
-                        print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI. Bye!{RESET}")
+                        print(f"\n{GREEN_LIGHT}{GOODBYE_MESSAGE}{RESET}")
                         print(f"   {GRAY}\033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{RESET}")
                         print()
                         break
@@ -994,7 +1022,7 @@ async def _remote_chat_loop_ag_ui(url: str) -> None:
                     print()
                     
                 except KeyboardInterrupt:
-                    print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI. Bye!{RESET}")
+                    print(f"\n{GREEN_LIGHT}{GOODBYE_MESSAGE}{RESET}")
                     print(f"   {GRAY}\033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{RESET}")
                     print()
                     break

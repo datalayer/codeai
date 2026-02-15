@@ -48,6 +48,9 @@ BOLD = '\033[1m'
 DIM = '\033[2m'
 RESET = '\033[0m'
 
+# Goodbye message displayed on exit
+GOODBYE_MESSAGE = '✨ Thank you for using Code AI. See you soon!'
+
 # ASCII Art Banner with Datalayer brand colors
 BANNER = f"""
 {GREEN_DARK}{BOLD}╔═══════════════════════════════════════════════════════════════╗
