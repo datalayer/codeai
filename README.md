@@ -51,10 +51,10 @@ Special commands available in interactive mode:
 
 ### Launch with Preconfigured Agent
 
-You can launch CodeAI with a specific agent configuration using the `--agent-id` parameter:
+You can launch CodeAI with a specific agent configuration using the `--agentspec-id` parameter:
 
 ```bash
-codeai --agent-id codemode-paper/financial-viz
+codeai --agentspec-id codemode-paper/financial-viz
 ```
 
 Available agent IDs can be found in the [agentspecs repository](https://github.com/datalayer/agentspecs/tree/main/agentspecs/agents). Each agent is optimized for specific tasks and comes with pre-configured tools and capabilities.
