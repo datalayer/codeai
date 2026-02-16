@@ -57,13 +57,19 @@ publish-pypi: # publish the pypi package
 	@exec echo
 	@exec echo https://pypi.org/project/codeai/#history
 
-code-ai-data-acquisition: # KAGGLE_TOKEN and TAVILY_API_KEY must be set in env
+codeai: # codeai
 	@AWS_ACCESS_KEY_ID=${DATALAYER_BEDROCK_AWS_ACCESS_KEY_ID} \
 	AWS_SECRET_ACCESS_KEY=${DATALAYER_BEDROCK_AWS_SECRET_ACCESS_KEY} \
 	AWS_DEFAULT_REGION=${DATALAYER_BEDROCK_AWS_DEFAULT_REGION} \
-		codeai --eggs --agent-id datalayer-ai/data-acquisition 
+		codeai --eggs
 
-code-ai-financial: # ALPHA_VANTAGE_API_KEY must be set in env
+codeai-data-acquisition: # codeai-data-acquisition KAGGLE_TOKEN and TAVILY_API_KEY must be set in env
+	@AWS_ACCESS_KEY_ID=${DATALAYER_BEDROCK_AWS_ACCESS_KEY_ID} \
+	AWS_SECRET_ACCESS_KEY=${DATALAYER_BEDROCK_AWS_SECRET_ACCESS_KEY} \
+	AWS_DEFAULT_REGION=${DATALAYER_BEDROCK_AWS_DEFAULT_REGION} \
+		codeai --eggs --agent-id datalayer-ai/data-acquisition
+
+codeai-financial: # codeai-financial ALPHA_VANTAGE_API_KEY must be set in env
 	@AWS_ACCESS_KEY_ID=${DATALAYER_BEDROCK_AWS_ACCESS_KEY_ID} \
 	AWS_SECRET_ACCESS_KEY=${DATALAYER_BEDROCK_AWS_SECRET_ACCESS_KEY} \
 	AWS_DEFAULT_REGION=${DATALAYER_BEDROCK_AWS_DEFAULT_REGION} \

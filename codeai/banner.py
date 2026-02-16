@@ -34,6 +34,7 @@ GREEN_DARK = '\033[38;2;22;160;133m'    # #16A085 - Green brand
 GREEN_MEDIUM = '\033[38;2;26;188;156m'  # #1ABC9C - Green accent
 GREEN_LIGHT = '\033[38;2;46;204;113m'   # #2ECC71 - Green bright
 GREEN_TEXT = '\033[38;2;17;122;101m'    # #117A65 - Accessible green text
+RED = '\033[38;2;231;76;60m'            # #E74C3C - Error / missing
 GRAY = '\033[38;2;89;89;92m'            # #59595C - Secondary text
 WHITE = '\033[38;2;255;255;255m'        # #FFFFFF - Primary text (dark mode)
 
@@ -47,6 +48,9 @@ BOLD = '\033[1m'
 DIM = '\033[2m'
 RESET = '\033[0m'
 
+# Goodbye message displayed on exit
+GOODBYE_MESSAGE = '✨ Thank you for using Code AI. See you soon!'
+
 # ASCII Art Banner with Datalayer brand colors
 BANNER = f"""
 {GREEN_DARK}{BOLD}╔═══════════════════════════════════════════════════════════════╗
@@ -55,7 +59,7 @@ BANNER = f"""
 ║   {GREEN_LIGHT}░█░░░█░█░█░█░█▀▀░█▀█░░█░  {WHITE}Cheaper • Faster • Collaborative  {GREEN_DARK}║
 ║   {GREEN_LIGHT}░▀▀▀░▀▀▀░▀▀░░▀▀▀░▀░▀░▀▀▀  {GREEN_DARK}                                  {GREEN_DARK}║
 ║                                                               ║
-║   {GREEN_DARK}✨ Data Analysis  {GREEN_MEDIUM}📊 Data Science  {GREEN_LIGHT}📓 Jupyter               {GREEN_DARK}║
+║   {GREEN_DARK}✨ Data Analysis  {GREEN_MEDIUM}📊 Data Science  {GREEN_LIGHT}📓 Software Development  {GREEN_DARK}║
 ║                                                               ║
 ║   {GRAY}Type /exit to quit  •  Type / for commands                  {GREEN_DARK}║
 ╚═══════════════════════════════════════════════════════════════╝{RESET}

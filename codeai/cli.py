@@ -70,6 +70,7 @@ from .banner import (
     GREEN_DARK,
     GREEN_MEDIUM,
     GREEN_LIGHT,
+    RED,
     GRAY,
     WHITE,
     # Legacy colors
@@ -82,6 +83,7 @@ from .banner import (
     DIM,
     RESET,
     BANNER,
+    GOODBYE_MESSAGE,
     show_banner,
 )
 
@@ -154,9 +156,11 @@ class Spinner:
         self.stop()
 
 
+from agent_runtimes.specs.models import DEFAULT_MODEL
+
 # Define the Code AI agent with instructions
 agent = Agent(
-    'bedrock:us.anthropic.claude-sonnet-4-5-20250514-v1:0',
+    DEFAULT_MODEL.value,
     instructions="""You are Code AI, a helpful AI assistant specialized in code analysis, 
     Jupyter notebooks, and data science workflows. You help users with:
     - Writing and debugging code
@@ -201,16 +205,25 @@ def _show_version() -> None:
     typer.echo(f"{GRAY}Powered by Datalayer • \033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{RESET}")
 
 
-def _run_agent_runtime_server(host: str, port: int, agent_id: str, codemode: bool, protocol):
+def _run_agent_runtime_server(host: str, port: int, agent_id: str, codemode: bool, protocol, port_value=None):
     """Run the agent-runtimes server (for multiprocessing).
     
     This must be a module-level function (not nested) to be picklable.
+
+    Args:
+        host: Host to bind to
+        port: Requested port (0 = auto-select a random free port)
+        agent_id: Agent spec ID
+        codemode: Enable codemode
+        protocol: Transport protocol
+        port_value: Optional multiprocessing.Value('i') to communicate the
+            effective port back to the parent process.
     """
     import logging
     import sys
     import os
-    from agent_runtimes.commands import serve_server
-    from agent_runtimes.config.agents import get_agent_spec
+    from agent_runtimes.commands import serve_server, find_random_free_port
+    from agent_runtimes.specs.agents import get_agent_spec
     
     # Only suppress logging if not in debug mode
     debug_mode = os.environ.get('CODEAI_DEBUG') == '1'
@@ -236,20 +249,34 @@ def _run_agent_runtime_server(host: str, port: int, agent_id: str, codemode: boo
         logging.basicConfig(level=logging.DEBUG)
         print(f"[DEBUG] Starting agent runtime server in debug mode")
     
-    # Load agent spec to get MCP servers
+    # Resolve port in this process so we can communicate it back
+    actual_port = port
+    if port == 0:
+        actual_port = find_random_free_port(host)
+
+    # Write effective port to shared value so the parent process can read it
+    if port_value is not None:
+        port_value.value = actual_port
+
+    # Load agent spec to get MCP servers and sandbox variant
     mcp_servers_str = "tavily"  # Default fallback
+    sandbox_variant = "jupyter"  # Default for codeai
     agent_spec = get_agent_spec(agent_id)
-    if agent_spec and agent_spec.mcp_servers:
-        mcp_servers_str = ",".join([server.id for server in agent_spec.mcp_servers])
+    if agent_spec:
+        if agent_spec.mcp_servers:
+            mcp_servers_str = ",".join([server.id for server in agent_spec.mcp_servers])
+        if agent_spec.sandbox_variant:
+            sandbox_variant = agent_spec.sandbox_variant
     
     serve_server(
         host=host,
-        port=port,
+        port=actual_port,
         agent_id=agent_id,
         agent_name="codeai",
         no_config_mcp_servers=True,  # Disable config MCP servers
         mcp_servers=mcp_servers_str,  # Use MCP servers from agent spec
         codemode=codemode,  # Enable/disable codemode based on flag
+        sandbox_variant=sandbox_variant if codemode else None,
         protocol=protocol,
     )
 
@@ -257,7 +284,7 @@ def _run_agent_runtime_server(host: str, port: int, agent_id: str, codemode: boo
 def _start_agent_runtime_server(
     agent_id: str,
     host: str = "127.0.0.1",
-    port: int = 8000,
+    port: int = 0,
     transport: Transport = Transport.ag_ui,
     codemode: bool = True,
     debug: bool = False,
@@ -267,7 +294,7 @@ def _start_agent_runtime_server(
     Args:
         agent_id: Agent spec ID to start
         host: Host to bind to
-        port: Starting port (will find free port if taken)
+        port: Port to bind to (0 = auto-select a random free port)
         transport: Transport protocol to use (ag-ui or acp)
         codemode: Enable codemode (default True)
         debug: Enable debug logging (default False)
@@ -275,17 +302,7 @@ def _start_agent_runtime_server(
     Returns:
         Tuple of (process, actual_port)
     """
-    from agent_runtimes.commands import serve_server, is_port_free, find_free_port, ServeError, Protocol
-    
-    # Find a free port
-    actual_port = port
-    if not is_port_free(host, port):
-        try:
-            actual_port = find_free_port(host, port)
-            print(f"{GRAY}Port {port} is in use, using port {actual_port}{RESET}")
-        except ServeError as e:
-            print(f"{GREEN_DARK}[ERROR]{RESET} {e}", file=sys.stderr)
-            raise typer.Exit(1)
+    from agent_runtimes.commands import Protocol
     
     # Map transport to protocol
     protocol = Protocol.ag_ui if transport == Transport.ag_ui else Protocol.ag_ui  # ACP uses same server
@@ -295,13 +312,28 @@ def _start_agent_runtime_server(
         import os
         os.environ['CODEAI_DEBUG'] = '1'
     
+    # Shared value so the child process can report the effective port
+    port_value = multiprocessing.Value('i', 0)
+
     process = multiprocessing.Process(
         target=_run_agent_runtime_server,
-        args=(host, actual_port, agent_id, codemode, protocol),
+        args=(host, port, agent_id, codemode, protocol, port_value),
         daemon=True
     )
     process.start()
     
+    # Wait for the child to resolve the port (happens before uvicorn.run)
+    timeout = 10.0
+    start = time.time()
+    while port_value.value == 0 and time.time() - start < timeout:
+        if not process.is_alive():
+            break
+        time.sleep(0.05)
+    
+    actual_port = port_value.value
+    if actual_port == 0:
+        raise RuntimeError("Agent runtime failed to resolve a port")
+
     return process, actual_port
 
 
@@ -333,6 +365,185 @@ def _wait_for_server(host: str, port: int, timeout: float = 30.0) -> bool:
     return False
 
 
+def _fetch_startup_info(host: str, port: int) -> dict | None:
+    """Fetch startup info from the running agent-runtimes server.
+    
+    Args:
+        host: Server host
+        port: Server port
+        
+    Returns:
+        The startup info dict, or None on failure.
+    """
+    import httpx
+
+    url = f"http://{host}:{port}/health/startup"
+    try:
+        response = httpx.get(url, timeout=3.0)
+        if response.status_code == 200:
+            return response.json()
+    except Exception:
+        pass
+    return None
+
+
+def _format_startup_info(host: str, port: int, info: dict | None) -> str:
+    """Format startup info for CLI display.
+    
+    Args:
+        host: Runtime server host
+        port: Runtime server port
+        info: The startup info dict from /health/startup
+        
+    Returns:
+        Formatted string ready for terminal output.
+    """
+    lines: list[str] = []
+
+    lines.append(f"  {GREEN_MEDIUM}Runtime{RESET}  http://{host}:{port}")
+
+    if info:
+        agent_info = info.get("agent", {})
+        sandbox_info = info.get("sandbox", {})
+
+        if agent_info.get("protocol"):
+            lines.append(f"  {GREEN_MEDIUM}Protocol{RESET} {agent_info['protocol']}")
+        if agent_info.get("model"):
+            lines.append(f"  {GREEN_MEDIUM}Model{RESET}    {agent_info['model']}")
+        if agent_info.get("codemode"):
+            lines.append(f"  {GREEN_MEDIUM}Codemode{RESET} enabled")
+
+        variant = sandbox_info.get("variant")
+        if variant:
+            sandbox_line = f"  {GREEN_MEDIUM}Sandbox{RESET}  {variant}"
+            jupyter_url = sandbox_info.get("jupyter_url")
+            if jupyter_url:
+                sandbox_line += f"  {GRAY}({jupyter_url}){RESET}"
+            else:
+                jupyter_host = sandbox_info.get("jupyter_host")
+                jupyter_port = sandbox_info.get("jupyter_port")
+                if jupyter_host and jupyter_port:
+                    sandbox_line += f"  {GRAY}({jupyter_host}:{jupyter_port}){RESET}"
+            lines.append(sandbox_line)
+
+        skills = agent_info.get("skills", [])
+        if skills:
+            lines.append(f"  {GREEN_MEDIUM}Skills{RESET}   {', '.join(skills)}")
+
+        mcp_servers = agent_info.get("mcp_servers", [])
+        if mcp_servers:
+            lines.append(f"  {GREEN_MEDIUM}MCP{RESET}      {', '.join(mcp_servers)}")
+
+    return "\n".join(lines)
+
+
+def _spec_has_valid_env(spec) -> bool:
+    """Return True when a spec is enabled and all its required env vars are set."""
+    if not spec.enabled:
+        return False
+    for mcp in spec.mcp_servers:
+        for var in mcp.required_env_vars:
+            if not os.environ.get(var):
+                return False
+    return True
+
+
+def _pick_agentspec_interactive() -> str:
+    """Show available agent specs and let the user pick one interactively.
+
+    Specs are split into two groups:
+      ● Valid   – enabled with all required env vars present (selectable)
+      ○ Invalid – disabled or missing env vars (shown for reference, not selectable)
+
+    The first valid spec is proposed as the default (press Enter to select it).
+
+    Returns:
+        The chosen agent spec ID.
+    """
+    from agent_runtimes.specs.agents import list_agent_specs
+
+    specs = list_agent_specs()
+    if not specs:
+        print(f"{GREEN_DARK}[ERROR]{RESET} No agent specs found", file=sys.stderr)
+        raise typer.Exit(1)
+
+    # Partition into valid (enabled + all env vars) and the rest, each sorted by id
+    valid_specs = sorted([s for s in specs if _spec_has_valid_env(s)], key=lambda s: s.id)
+    other_specs = sorted([s for s in specs if not _spec_has_valid_env(s)], key=lambda s: s.id)
+    ordered = valid_specs + other_specs
+    valid_count = len(valid_specs)
+
+    # Default is the first valid spec (index 0) when available
+    default_idx: Optional[int] = 0 if valid_count > 0 else None
+
+    print(f"\n{GREEN_LIGHT}Available Agent Specs:{RESET}\n")
+    for i, spec in enumerate(ordered, 1):
+        is_valid = i <= valid_count
+        bullet = f" {GREEN_MEDIUM}●{RESET}" if is_valid else f" {GRAY}○{RESET}"
+        default_marker = f" {GREEN_LIGHT}(default){RESET}" if (i - 1) == default_idx else ""
+        num_color = GREEN_MEDIUM if is_valid else GRAY
+        print(f"  {num_color}{i:>3}.{RESET}{bullet} {WHITE}{spec.id}{RESET}{default_marker}")
+        if spec.description:
+            desc_line = spec.description.strip().split('\n')[0]
+            if len(desc_line) > 70:
+                desc_line = desc_line[:67] + "..."
+            print(f"       {GRAY}{desc_line}{RESET}")
+        # Show required env vars with availability status
+        env_vars: set[str] = set()
+        for mcp in spec.mcp_servers:
+            env_vars.update(mcp.required_env_vars)
+        if env_vars:
+            env_parts: list[str] = []
+            for var in sorted(env_vars):
+                if os.environ.get(var):
+                    env_parts.append(f"{GREEN_LIGHT}{var}{RESET}")
+                else:
+                    env_parts.append(f"{RED}{var}{RESET}")
+            print(f"       {' '.join(env_parts)}")
+
+    if valid_count == 0:
+        print(f"\n{RED}No valid agent specs available.{RESET}")
+        print(f"{GRAY}Enable a spec and/or set the required environment variables.{RESET}")
+        raise typer.Exit(1)
+
+    default_display = f" [{default_idx + 1}]" if default_idx is not None else ""
+    print()
+    while True:
+        try:
+            choice = input(f"{GREEN_MEDIUM}Choose an agent spec [1-{valid_count}]{default_display}: {RESET}").strip()
+            if not choice:
+                if default_idx is not None:
+                    chosen = ordered[default_idx]
+                    print(f"\n{GREEN_LIGHT}Selected:{RESET} {chosen.id}\n")
+                    return chosen.id
+                continue
+            idx = int(choice) - 1
+            if 0 <= idx < valid_count:
+                chosen = ordered[idx]
+                print(f"\n{GREEN_LIGHT}Selected:{RESET} {chosen.id}\n")
+                return chosen.id
+            elif 0 <= idx < len(ordered):
+                print(f"{GRAY}Agent spec #{choice} is not available (disabled or missing env vars).{RESET}")
+                print(f"{GRAY}Please enter a number between 1 and {valid_count}.{RESET}")
+            else:
+                print(f"{GRAY}Please enter a number between 1 and {valid_count}.{RESET}")
+        except ValueError:
+            # Allow typing the spec ID directly (only valid ones)
+            matching = [s for s in valid_specs if s.id == choice]
+            if matching:
+                print(f"\n{GREEN_LIGHT}Selected:{RESET} {matching[0].id}\n")
+                return matching[0].id
+            # Check if it matches an invalid spec for a helpful message
+            invalid_match = [s for s in other_specs if s.id == choice]
+            if invalid_match:
+                print(f"{GRAY}Agent spec '{choice}' is not available (disabled or missing env vars).{RESET}")
+            else:
+                print(f"{GRAY}Invalid input. Enter a number or a valid agent spec ID.{RESET}")
+        except (KeyboardInterrupt, EOFError):
+            print()
+            raise typer.Exit(0)
+
+
 @app.callback(invoke_without_command=True)
 def main_callback(
     ctx: typer.Context,
@@ -340,17 +551,17 @@ def main_callback(
         None,
         help="Query to send to the AI agent. If not provided, starts interactive mode."
     ),
-    agent_id: Optional[str] = typer.Option(
-        "data-acquisition",
-        "--agent-id",
+    agentspec_id: Optional[str] = typer.Option(
+        None,
+        "--agentspec-id",
         "-a",
         help="Agent spec ID to start from the agent-runtimes library"
     ),
     port: int = typer.Option(
-        8000,
+        0,
         "--port",
         "-p",
-        help="Port for the agent-runtimes server (will find free port if taken)"
+        help="Port for the agent-runtimes server (0 = auto-select random free port)"
     ),
     banner: bool = typer.Option(
         False,
@@ -393,15 +604,18 @@ def main_callback(
     Run without arguments to start interactive chat mode with slash commands.
     Provide a query as arguments for single-shot mode.
     
+    If no --agentspec-id is given, lists available agent specs and prompts
+    you to choose one interactively.
+    
     Examples:
     
-        codeai                          # Interactive mode with slash commands
+        codeai                                    # Pick agent spec interactively
         
-        codeai --agent-id crawler       # Interactive mode with crawler agent
+        codeai --agentspec-id crawler              # Use specific agent spec
         
-        codeai "What is Python?"        # Single query mode
+        codeai "What is Python?"                   # Single query mode
         
-        codeai -a crawler "Search for AI trends"  # Single query with specific agent
+        codeai -a crawler "Search for AI trends"   # Single query with specific agent
     """
     # If a subcommand was invoked, don't run the default behavior
     if ctx.invoked_subcommand is not None:
@@ -412,6 +626,20 @@ def main_callback(
         raise typer.Exit(0)
     
     global _subprocess_ref
+    
+    # Show ASCII banner early (before agent selection)
+    from .banner import show_banner, BANNER, DIM, RESET as BANNER_RESET
+    if banner or banner_all:
+        show_banner(splash=banner, splash_all=banner_all)
+    else:
+        if sys.stdout.isatty():
+            print(BANNER)
+            print(f"{DIM}Powered by Datalayer  •  \033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{BANNER_RESET}\n")
+    
+    # Resolve agent spec: use provided ID or pick interactively
+    agent_id = agentspec_id
+    if agent_id is None:
+        agent_id = _pick_agentspec_interactive()
     
     try:
         if query:
@@ -435,6 +663,11 @@ def main_callback(
                     _cleanup_subprocess()
                     raise typer.Exit(1)
                 
+                # Display startup info
+                startup_info = _fetch_startup_info("127.0.0.1", actual_port)
+                print(_format_startup_info("127.0.0.1", actual_port, startup_info))
+                print()
+                
                 # Connect to the agent and run the query
                 url = f"http://127.0.0.1:{actual_port}/api/v1/ag-ui/codeai/"
                 try:
@@ -454,18 +687,6 @@ def main_callback(
                 from rich.spinner import Spinner
                 from rich.live import Live
                 
-                # Show ASCII banner first (always show it)
-                from .banner import show_banner, BANNER, DIM, RESET as BANNER_RESET
-                
-                # Show animated banner if requested, otherwise just static banner
-                if banner or banner_all:
-                    show_banner(splash=banner, splash_all=banner_all)
-                else:
-                    # Just show static banner
-                    if sys.stdout.isatty():
-                        print(BANNER)
-                        print(f"{DIM}Powered by Datalayer  •  \033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{BANNER_RESET}\n")
-                
                 # Show starting message with spinner
                 console = Console()
                 with Live(
@@ -480,7 +701,7 @@ def main_callback(
                     _subprocess_ref = process  # Register for cleanup
                     
                     # Update status while waiting with more visible styling
-                    live.update(Spinner("dots", text=f"[bold cyan]Waiting for agent runtime on port {actual_port}...[/bold cyan]", style="cyan"))
+                    live.update(Spinner("dots", text=f"[bold cyan]Waiting for agent runtime '{agent_id}' on port {actual_port}...[/bold cyan]", style="cyan"))
                     
                     # Wait for server to be ready
                     if not _wait_for_server("127.0.0.1", actual_port, timeout=60.0):
@@ -491,13 +712,34 @@ def main_callback(
                     
                     live.update(Spinner("dots", text=f"[bold green]Agent runtime ready![/bold green]", style="green"))
                 
+                # Display startup info
+                startup_info = _fetch_startup_info("127.0.0.1", actual_port)
+                print(_format_startup_info("127.0.0.1", actual_port, startup_info))
+                print()
+
+                # Extract Jupyter URL for the /jupyter slash command
+                jupyter_url = None
+                if startup_info:
+                    sandbox_info = startup_info.get("sandbox", {})
+                    jupyter_url = sandbox_info.get("jupyter_url")
+                    if not jupyter_url:
+                        jh = sandbox_info.get("jupyter_host")
+                        jp = sandbox_info.get("jupyter_port")
+                        if jh and jp:
+                            jupyter_url = f"http://{jh}:{jp}"
+                    # Append token as query param so the browser can authenticate
+                    if jupyter_url:
+                        jupyter_token = sandbox_info.get("jupyter_token")
+                        if jupyter_token:
+                            jupyter_url = f"{jupyter_url}?token={jupyter_token}"
+
                 url = f"http://127.0.0.1:{actual_port}/api/v1/ag-ui/codeai/"
                 server_url = f"http://127.0.0.1:{actual_port}"
                 
                 try:
                     # Use Rich-based TUX
                     from .tux import run_tux
-                    asyncio.run(run_tux(url, server_url, agent_id="codeai", eggs=eggs))
+                    asyncio.run(run_tux(url, server_url, agent_id="codeai", eggs=eggs, jupyter_url=jupyter_url))
                 finally:
                     _cleanup_subprocess()
             else:
@@ -509,7 +751,7 @@ def main_callback(
         raise
     except KeyboardInterrupt:
         _cleanup_subprocess()
-        print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI! Goodbye!{RESET}")
+        print(f"\n{GREEN_LIGHT}{GOODBYE_MESSAGE}{RESET}")
         print(f"   {GRAY}\033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{RESET}")
         print()
         raise typer.Exit(0)
@@ -676,7 +918,7 @@ async def _remote_chat_loop_acp(url: str) -> None:
                         continue
                     
                     if user_input.lower() in ("quit", "exit", "q"):
-                        print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI! Goodbye!{RESET}")
+                        print(f"\n{GREEN_LIGHT}{GOODBYE_MESSAGE}{RESET}")
                         print(f"   {GRAY}\033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{RESET}")
                         print()
                         break
@@ -711,7 +953,7 @@ async def _remote_chat_loop_acp(url: str) -> None:
                     print()
                     
                 except KeyboardInterrupt:
-                    print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI! Goodbye!{RESET}")
+                    print(f"\n{GREEN_LIGHT}{GOODBYE_MESSAGE}{RESET}")
                     print(f"   {GRAY}\033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{RESET}")
                     print()
                     break
@@ -744,7 +986,7 @@ async def _remote_chat_loop_ag_ui(url: str) -> None:
                         continue
                     
                     if user_input.lower() in ("quit", "exit", "q"):
-                        print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI! Goodbye!{RESET}")
+                        print(f"\n{GREEN_LIGHT}{GOODBYE_MESSAGE}{RESET}")
                         print(f"   {GRAY}\033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{RESET}")
                         print()
                         break
@@ -780,7 +1022,7 @@ async def _remote_chat_loop_ag_ui(url: str) -> None:
                     print()
                     
                 except KeyboardInterrupt:
-                    print(f"\n{GREEN_LIGHT}✨ Thank you for using Code AI! Goodbye!{RESET}")
+                    print(f"\n{GREEN_LIGHT}{GOODBYE_MESSAGE}{RESET}")
                     print(f"   {GRAY}\033]8;;https://datalayer.ai\033\\https://datalayer.ai\033]8;;\033\\{RESET}")
                     print()
                     break

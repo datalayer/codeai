@@ -1,0 +1,37 @@
+---
+sidebar_position: 1
+title: Code AI
+slug: /
+---
+
+import DocCardList from '@theme/DocCardList';
+import { useDocsSidebar } from '@docusaurus/plugin-content-docs/client';
+
+# ✨ Code AI
+
+**Code AI** is an AI-powered CLI agent for data analysis that interacts with [Agent Runtimes](https://github.com/datalayer/codeai) via the AG-UI and ACP protocols.
+
+Built on [Pydantic AI](https://ai.pydantic.dev), it provides an interactive terminal experience for code analysis, Jupyter notebooks, and data science workflows — all from your terminal.
+
+## Quick Start
+
+```bash
+pip install codeai
+codeai
+```
+
+This starts an interactive session with a background codeai server and the default agent spec. See the [CLI](./cli/) page for all options.
+
+## Features
+
+- **Interactive TUX** — Claude Code-inspired terminal interface with Rich rendering, slash commands, and keyboard shortcuts
+- **Agent Specs** — launch preconfigured agents from the [agentspecs catalogue](https://github.com/datalayer/agentspecs) with `--agentspec-id` or pick one interactively
+- **MCP Tools** — agents can use MCP servers (search, file access, APIs) as tools
+- **Codemode** — MCP tools are exposed as programmatic tools the LLM can compose into code
+- **Streaming** — real-time response streaming with tool call visualization
+- **AG-UI & ACP** — connect to local or remote agent servers via HTTP/SSE or WebSocket
+- **Context Tracking** — visualize token usage, export conversation context
+
+## Documentation
+
+<DocCardList items={useDocsSidebar().items} />
