@@ -75,12 +75,14 @@ codeai-financial: # codeai-financial ALPHA_VANTAGE_API_KEY must be set in env
 	AWS_DEFAULT_REGION=${DATALAYER_BEDROCK_AWS_DEFAULT_REGION} \
 		codeai --eggs --agentspec-id datalayer-ai/financial
 
-###########
-# Prompts #
-###########
+##########
+#  Demo  #
+##########
+
 # List files located in the sales-data folder of my Google Drive account (eric@datalayer.io).
 # Aggregate all CSV files located in the sales-data folder of my Google Drive account (eric@datalayer.io) into a single file named sales_21-25.csv, and save this aggregated file in the sales-data directory of the echarles/openteams-codemode-demo repository.
-codeai-openteams-demo: # codeai-openteams-demo
+
+codeai-demo: # codeai-demo
 	@AWS_ACCESS_KEY_ID=${DATALAYER_BEDROCK_AWS_ACCESS_KEY_ID} \
 	AWS_SECRET_ACCESS_KEY=${DATALAYER_BEDROCK_AWS_SECRET_ACCESS_KEY} \
 	AWS_DEFAULT_REGION=${DATALAYER_BEDROCK_AWS_DEFAULT_REGION} \
@@ -88,7 +90,7 @@ codeai-openteams-demo: # codeai-openteams-demo
 	GOOGLE_OAUTH_CLIENT_SECRET=${OPENTEAMS_DEMO_GOOGLE_CLIENT_SECRET} \
 		codeai --eggs --agentspec-id codemode-paper/information-routing
 
-codeai-openteams-demo-nocodemode: # codeai-openteams-demo-codemode
+codeai-demo-nocodemode: # codeai-demo-nocodemode
 	@AWS_ACCESS_KEY_ID=${DATALAYER_BEDROCK_AWS_ACCESS_KEY_ID} \
 	AWS_SECRET_ACCESS_KEY=${DATALAYER_BEDROCK_AWS_SECRET_ACCESS_KEY} \
 	AWS_DEFAULT_REGION=${DATALAYER_BEDROCK_AWS_DEFAULT_REGION} \

@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional, Any
 
+from .commands import SlashCommand, build_commands
+
 import httpx
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
@@ -68,16 +70,6 @@ SYMBOL_TOOLS = "⛀"
 SYMBOL_MESSAGES = "⛁"
 SYMBOL_FREE = "⛶"
 SYMBOL_BUFFER = "⛝"
-
-
-@dataclass
-class SlashCommand:
-    """Definition of a slash command."""
-    name: str
-    aliases: list[str] = field(default_factory=list)
-    description: str = ""
-    handler: Optional[Callable] = None
-    shortcut: Optional[str] = None  # e.g., "c-e" for Ctrl+E
 
 
 class SlashCommandCompleter(Completer):
@@ -204,8 +196,9 @@ class CodeAITux:
         self._agui_client: Optional[Any] = None  # Persistent AG-UI client for conversation history
         
         # Initialize slash commands
-        self.commands: dict[str, SlashCommand] = {}
-        self._register_commands()
+        self.commands: dict[str, SlashCommand] = build_commands(
+            self, eggs=eggs, jupyter_url=jupyter_url
+        )
         
         # Initialize prompt session with slash command completer
         # Style for the completion menu matching Datalayer brand colors
@@ -219,150 +212,6 @@ class CodeAITux:
             "scrollbar.button": "bg:#16A085",
         })
         self.prompt_session: Optional[PromptSession] = None
-    
-    def _register_commands(self) -> None:
-        """Register all slash commands.
-        
-        Keyboard shortcuts use Escape sequences (press Escape then the key)
-        to avoid conflicts with terminal control characters like:
-        - Ctrl+M = Enter, Ctrl+H = Backspace, Ctrl+D = EOF
-        - Ctrl+A = Start of line, Ctrl+E = End of line, Ctrl+L = Clear
-        """
-        commands = [
-            SlashCommand(
-                name="context",
-                description="Visualize current context usage as a colored grid",
-                handler=self._cmd_context,
-                shortcut="escape x",  # Esc, X
-            ),
-            SlashCommand(
-                name="clear",
-                aliases=["reset", "new"],
-                description="Clear conversation history and free up context",
-                handler=self._cmd_clear,
-                shortcut="escape c",  # Esc, C
-            ),
-            SlashCommand(
-                name="help",
-                aliases=["?"],
-                description="Show available commands",
-                handler=self._cmd_help,
-                shortcut="escape h",  # Esc, H
-            ),
-            SlashCommand(
-                name="status",
-                description="Show Code AI status including model, tokens, and connectivity",
-                handler=self._cmd_status,
-                shortcut="escape s",  # Esc, S
-            ),
-            SlashCommand(
-                name="exit",
-                aliases=["quit", "q"],
-                description="Exit Code AI",
-                handler=self._cmd_exit,
-                shortcut="escape q",  # Esc, Q
-            ),
-            SlashCommand(
-                name="agents",
-                description="List available agents on the server",
-                handler=self._cmd_agents,
-                shortcut="escape a",  # Esc, A
-            ),
-            SlashCommand(
-                name="tools",
-                description="List available tools for the current agent",
-                handler=self._cmd_tools,
-                shortcut="escape t",  # Esc, T
-            ),
-            SlashCommand(
-                name="mcp-servers",
-                aliases=["mcp"],
-                description="List MCP servers and their status",
-                handler=self._cmd_mcp_servers,
-                shortcut="escape m",  # Esc, M
-            ),
-            SlashCommand(
-                name="skills",
-                description="List available skills (requires codemode enabled)",
-                handler=self._cmd_skills,
-                shortcut="escape k",  # Esc, K (sKills)
-            ),
-            SlashCommand(
-                name="codemode-toggle",
-                aliases=["codemode"],
-                description="Toggle codemode on/off for enhanced code capabilities",
-                handler=self._cmd_codemode_toggle,
-                shortcut="escape o",  # Esc, O (cOdemode)
-            ),
-            SlashCommand(
-                name="context-export",
-                aliases=["export"],
-                description="Export the current context to a CSV file",
-                handler=self._cmd_context_export,
-                shortcut="escape e",  # Esc, E
-            ),
-            SlashCommand(
-                name="tools-last",
-                aliases=["tl"],
-                description="Show details of tool calls from last response",
-                handler=self._cmd_tools_last,
-                shortcut="escape l",  # Esc, L (Last)
-            ),
-            SlashCommand(
-                name="cls",
-                description="Clear the screen",
-                handler=self._cmd_cls,
-            ),
-        ]
-        
-        # Add Easter egg commands if enabled
-        if self.eggs:
-            commands.extend([
-                SlashCommand(
-                    name="rain",
-                    description="Matrix rain animation",
-                    handler=self._cmd_rain,
-                    shortcut="escape r",  # Esc, R
-                ),
-                SlashCommand(
-                    name="about",
-                    description="About Datalayer",
-                    handler=self._cmd_about,
-                    shortcut="escape l",  # Esc, L
-                ),
-                SlashCommand(
-                    name="gif",
-                    description="Black hole spinning animation",
-                    handler=self._cmd_gif,
-                    shortcut="escape g",  # Esc, G
-                ),
-            ])
-        
-        # Add /jupyter command only when a Jupyter sandbox is active
-        if self.jupyter_url:
-            commands.append(
-                SlashCommand(
-                    name="jupyter",
-                    description="Open the Jupyter server in your browser",
-                    handler=self._cmd_jupyter,
-                    shortcut="escape j",  # Esc, J
-                ),
-            )
-
-        # /browser opens the web-based chat UI served by the agent-runtimes server
-        commands.append(
-            SlashCommand(
-                name="browser",
-                description="Open the Agent chat UI in your browser",
-                handler=self._cmd_browser,
-                shortcut="escape w",  # Esc, W (web)
-            ),
-        )
-
-        for cmd in commands:
-            self.commands[cmd.name] = cmd
-            for alias in cmd.aliases:
-                self.commands[alias] = cmd
     
     def _format_tokens(self, tokens: int) -> str:
         """Format token count with K suffix for thousands."""
