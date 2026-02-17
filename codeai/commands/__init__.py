@@ -61,6 +61,7 @@ def build_commands(
         tools_last,
         cls,
         browser,
+        browser_notebook,
         suggestions,
     )
 
@@ -80,6 +81,7 @@ def build_commands(
         tools_last,
         cls,
         browser,
+        browser_notebook,
         suggestions,
     ]
 
