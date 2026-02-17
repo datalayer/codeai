@@ -27,7 +27,7 @@ async def execute(tux: "CodeAITux") -> Optional[str]:
         The chosen suggestion text, or None if cancelled / no suggestions.
     """
     from ..tux import STYLE_PRIMARY, STYLE_ACCENT, STYLE_MUTED, STYLE_WARNING
-    from ..banner import GREEN_MEDIUM, GREEN_LIGHT, GRAY, RESET
+    from ..banner import GREEN_MEDIUM, RESET
 
     # Fetch the agent spec which contains the suggestions list
     suggestions: list[str] = []
@@ -41,6 +41,10 @@ async def execute(tux: "CodeAITux") -> Optional[str]:
     except Exception as e:
         tux.console.print(f"[red]Error fetching suggestions: {e}[/red]")
         return None
+
+    # Append extra suggestions provided via --suggestions CLI flag
+    if tux.extra_suggestions:
+        suggestions = suggestions + tux.extra_suggestions
 
     if not suggestions:
         tux.console.print()
@@ -74,7 +78,8 @@ async def execute(tux: "CodeAITux") -> Optional[str]:
             if 0 <= idx < len(suggestions):
                 selected = suggestions[idx]
                 tux.console.print()
-                tux.console.print(f"  {GREEN_LIGHT}Prompting:{RESET} {selected}", style=STYLE_ACCENT)
+                tux.console.print("  Selected:", style=STYLE_PRIMARY, end=" ")
+                tux.console.print(selected, style=STYLE_ACCENT)
                 tux.console.print()
                 return selected
             else:

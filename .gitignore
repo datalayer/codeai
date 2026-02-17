@@ -125,4 +125,5 @@ docs/.yarn/*
 
 uv.lock
 
+tmp/
 *.csv

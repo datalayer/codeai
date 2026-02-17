@@ -2,19 +2,16 @@
 #
 # BSD 3-Clause License
 
-"""Terminal UX (TUX) for Code AI - Claude Code inspired interface."""
+"""Terminal UX (TUX) for Code AI."""
 
 import asyncio
 import getpass
 import json
-import os
-import random
-import shutil
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional, Any
+from typing import Optional, Any
 
 from .commands import SlashCommand, build_commands
 
@@ -27,25 +24,15 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style as PTStyle
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 from rich.text import Text
 from rich.columns import Columns
-from rich.markdown import Markdown
 from rich.live import Live
-from rich.spinner import Spinner as RichSpinner
 from rich.style import Style
-from rich.box import ROUNDED, HEAVY
+from rich.box import ROUNDED
 
 from .banner import (
-    GREEN_DARK,
-    GREEN_MEDIUM,
-    GREEN_LIGHT,
-    GRAY,
-    WHITE,
-    RESET,
     GOODBYE_MESSAGE,
 )
-from .animations import rain_animation, about_animation, gif_animation
 
 # Rich styles matching Datalayer brand
 # Brand color reference (from BRAND_MANUAL.md):
@@ -163,7 +150,7 @@ class SessionStats:
 
 
 class CodeAITux:
-    """Terminal UX for Code AI with Claude Code inspired interface."""
+    """Terminal UX for Code AI."""
     
     def __init__(
         self,
@@ -172,6 +159,7 @@ class CodeAITux:
         agent_id: str = "codeai",
         eggs: bool = False,
         jupyter_url: Optional[str] = None,
+        extra_suggestions: Optional[list[str]] = None,
     ):
         """Initialize the TUX.
         
@@ -181,12 +169,14 @@ class CodeAITux:
             agent_id: Agent ID for API calls
             eggs: Enable Easter egg commands
             jupyter_url: Jupyter server URL (only set when sandbox is jupyter)
+            extra_suggestions: Additional suggestions provided via --suggestions flag
         """
         self.agent_url = agent_url
         self.server_url = server_url.rstrip("/")
         self.agent_id = agent_id
         self.eggs = eggs
         self.jupyter_url = jupyter_url
+        self.extra_suggestions: list[str] = extra_suggestions or []
         self.console = Console()
         self.stats = SessionStats()
         self.running = False
@@ -233,7 +223,7 @@ class CodeAITux:
             return str(cwd)
     
     def show_welcome(self) -> None:
-        """Display the welcome banner similar to Claude Code."""
+        """Display the welcome banner."""
         username = self._get_username()
         cwd = self._get_cwd()
         
@@ -358,460 +348,17 @@ class CodeAITux:
         except KeyboardInterrupt:
             return ""
     
-    async def _cmd_context(self) -> None:
-        """Display context usage visualization."""
-        try:
-            async with httpx.AsyncClient() as client:
-                url = f"{self.server_url}/api/v1/configure/agents/{self.agent_id}/context-table?show_context=false"
-                response = await client.get(url, timeout=10.0)
-                response.raise_for_status()
-                data = response.json()
-        except Exception as e:
-            self.console.print(f"[red]Error fetching context: {e}[/red]")
-            return
-
-        if data.get("error"):
-            self.console.print(f"[red]{data.get('error')}[/red]")
-            return
-
-        table_text = data.get("table", "").rstrip()
-        if table_text:
-            self.console.print(Text.from_ansi(table_text))
-        else:
-            self.console.print("[red]No table content returned.[/red]")
-        return
-    
-    async def _cmd_cls(self) -> None:
-        """Clear the screen."""
-        self.console.clear()
-
-    async def _cmd_jupyter(self) -> None:
-        """Open the Jupyter server API page in the default browser."""
-        import webbrowser
-        if self.jupyter_url:
-            # Append /api so the browser lands on the Jupyter REST API root
-            sep = "&" if "?" in self.jupyter_url else "?"
-            base = self.jupyter_url.split("?")[0].rstrip("/") + "/api"
-            query = self.jupyter_url.split("?")[1] if "?" in self.jupyter_url else None
-            url = f"{base}?{query}" if query else base
-            self.console.print(f"  Opening [bold cyan]{url}[/bold cyan]")
-            webbrowser.open(url)
-        else:
-            self.console.print("  [yellow]No Jupyter server available.[/yellow]")
-
-    async def _cmd_browser(self) -> None:
-        """Open the Agent chat web UI in the default browser."""
-        import webbrowser
-        url = f"{self.server_url}/static/agent.html?agentId={self.agent_id}"
-        self.console.print(f"  Opening [bold cyan]{url}[/bold cyan]")
-        webbrowser.open(url)
-
-    async def _cmd_clear(self) -> None:
-        """Clear conversation history."""
-        try:
-            async with httpx.AsyncClient() as client:
-                url = f"{self.server_url}/api/v1/configure/agents/{self.agent_id}/context-details/reset"
-                response = await client.post(url, timeout=10.0)
-                response.raise_for_status()
-        except Exception as e:
-            self.console.print(f"[red]Error clearing context: {e}[/red]")
-            return
-        
-        # Reset local AG-UI client to clear conversation history
-        if self._agui_client is not None:
-            await self._agui_client.disconnect()
-            self._agui_client = None
-        
-        self.stats = SessionStats()
-        self.console.print("● Conversation cleared. Starting fresh.", style=STYLE_PRIMARY)
-    
-    async def _cmd_help(self) -> None:
-        """Show available commands."""
-        self.console.print()
-        self.console.print("Available Commands:", style=STYLE_WHITE)
-        self.console.print()
-        
-        # Format shortcuts nicely
-        def format_shortcut(shortcut: Optional[str]) -> str:
-            if not shortcut:
-                return ""
-            # Convert "escape x" to "Esc,X"
-            if shortcut.startswith("escape "):
-                return f"Esc,{shortcut[7:].upper()}"
-            # Convert "c-x" to "Ctrl+X"
-            if shortcut.startswith("c-"):
-                return f"Ctrl+{shortcut[2:].upper()}"
-            return shortcut
-        
-        shown = set()
-        for name, cmd in sorted(self.commands.items()):
-            if cmd.name in shown:
-                continue
-            shown.add(cmd.name)
-            
-            # Build command name with aliases
-            aliases_str = ""
-            if cmd.aliases:
-                aliases_str = f" ({', '.join(cmd.aliases)})"
-            
-            # Build shortcut indicator
-            shortcut_str = ""
-            if cmd.shortcut:
-                shortcut_str = f" [{format_shortcut(cmd.shortcut)}]"
-            
-            cmd_display = f"/{cmd.name}{aliases_str}"
-            self.console.print(f"  {cmd_display}", style=STYLE_PRIMARY, end="")
-            
-            # Calculate padding for alignment
-            padding_len = max(1, 22 - len(cmd_display))
-            self.console.print(" " * padding_len, end="")
-            self.console.print(cmd.description, style=STYLE_MUTED, end="")
-            
-            if shortcut_str:
-                self.console.print(f"  {shortcut_str}", style=STYLE_SECONDARY)
-            else:
-                self.console.print()
-        
-        self.console.print()
-    
-    async def _cmd_status(self) -> None:
-        """Show status information."""
-        self.console.print()
-        self.console.print("● Code AI Status", style=STYLE_PRIMARY)
-        self.console.print()
-        
-        # Version
-        from . import __version__
-        self.console.print(f"  Version: {__version__.__version__}", style=STYLE_MUTED)
-        
-        # Model
-        self.console.print(f"  Model: {self.model_name}", style=STYLE_MUTED)
-        
-        # Server
-        self.console.print(f"  Server: {self.server_url}", style=STYLE_MUTED)
-        
-        # Connection test
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(f"{self.server_url}/health", timeout=5.0)
-                if response.status_code == 200:
-                    self.console.print("  API: [green]Connected[/green]", style=STYLE_MUTED)
-                else:
-                    self.console.print(f"  API: [yellow]Status {response.status_code}[/yellow]", style=STYLE_MUTED)
-        except Exception:
-            self.console.print("  API: [red]Disconnected[/red]", style=STYLE_MUTED)
-        
-        # Session stats
-        self.console.print()
-        self.console.print(f"  Session tokens: {self._format_tokens(self.stats.total_tokens)}", style=STYLE_MUTED)
-        self.console.print(f"  Messages: {self.stats.messages}", style=STYLE_MUTED)
-        self.console.print()
-    
-    async def _cmd_exit(self) -> None:
-        """Exit the application."""
-        self.running = False
-        
-        # Clean up AG-UI client
-        if self._agui_client is not None:
-            await self._agui_client.disconnect()
-            self._agui_client = None
-        
-        self.console.print()
-        self.console.print(GOODBYE_MESSAGE, style=STYLE_ACCENT)
-        self.console.print("   [link=https://datalayer.ai]https://datalayer.ai[/link]", style=STYLE_MUTED)
-        self.console.print()
-    
-    async def _cmd_agents(self) -> None:
-        """List available agents with detailed information."""
-        try:
-            async with httpx.AsyncClient() as client:
-                url = f"{self.server_url}/api/v1/agents"
-                response = await client.get(url, timeout=10.0)
-                response.raise_for_status()
-                data = response.json()
-        except Exception as e:
-            self.console.print(f"[red]Error fetching agents: {e}[/red]")
-            return
-        
-        agents_list = data.get("agents", [])
-        
-        if not agents_list:
-            self.console.print("No agents available", style=STYLE_MUTED)
-            return
-        
-        self.console.print()
-        self.console.print(f"● Available Agents ({len(agents_list)}):", style=STYLE_PRIMARY)
-        self.console.print()
-        
-        for agent in agents_list:
-            agent_id = agent.get("id", "unknown")
-            name = agent.get("name", "Unknown")
-            description = agent.get("description", "")
-            model = agent.get("model", "unknown")
-            status = agent.get("status", "unknown")
-            toolsets = agent.get("toolsets", {})
-            
-            # Status indicator
-            status_icon = "[green]●[/green]" if status == "running" else "[red]○[/red]"
-            self.console.print(f"  {status_icon} {name} ({agent_id})", style=STYLE_ACCENT)
-            
-            # Description
-            if description:
-                desc = description[:60] + "..." if len(description) > 60 else description
-                self.console.print(f"    {desc}", style=STYLE_MUTED)
-            
-            # Model
-            self.console.print(f"    Model: {model}", style=STYLE_MUTED)
-            
-            # Codemode
-            codemode = toolsets.get("codemode", False)
-            codemode_text = "enabled" if codemode else "disabled"
-            codemode_style = STYLE_ACCENT if codemode else STYLE_MUTED
-            self.console.print(f"    Codemode: ", style=STYLE_MUTED, end="")
-            self.console.print(codemode_text, style=codemode_style)
-            
-            # MCP Servers
-            mcp_servers = toolsets.get("mcp_servers", [])
-            if mcp_servers:
-                mcp_text = ", ".join(mcp_servers[:5])
-                if len(mcp_servers) > 5:
-                    mcp_text += f" (+{len(mcp_servers) - 5} more)"
-                self.console.print(f"    MCP Servers: {mcp_text}", style=STYLE_MUTED)
-            
-            # Tools count
-            tools_count = toolsets.get("tools_count", 0)
-            if tools_count > 0:
-                self.console.print(f"    Tools: {tools_count}", style=STYLE_MUTED)
-            
-            # Skills
-            skills = toolsets.get("skills", [])
-            if skills:
-                skill_names = []
-                for s in skills[:3]:
-                    if isinstance(s, dict):
-                        skill_names.append(s.get("name", "?"))
-                    else:
-                        skill_names.append(str(s))
-                skills_text = ", ".join(skill_names)
-                if len(skills) > 3:
-                    skills_text += f" (+{len(skills) - 3} more)"
-                self.console.print(f"    Skills: {skills_text}", style=STYLE_MUTED)
-            
-            self.console.print()
-    
-    async def _cmd_tools(self) -> None:
-        """List available tools for the current agent."""
-        try:
-            async with httpx.AsyncClient() as client:
-                url = f"{self.server_url}/api/v1/configure/agents/{self.agent_id}/context-snapshot"
-                response = await client.get(url, timeout=10.0)
-                response.raise_for_status()
-                data = response.json()
-        except Exception as e:
-            self.console.print(f"[red]Error fetching tools: {e}[/red]")
-            return
-        
-        tools = data.get("tools", [])
-        
-        if not tools:
-            self.console.print("No tools available", style=STYLE_MUTED)
-            return
-        
-        self.console.print()
-        self.console.print(f"● Available Tools ({len(tools)}):", style=STYLE_PRIMARY)
-        self.console.print()
-        
-        for tool in tools:
-            tool_name = tool.get("name", "Unknown")
-            tool_desc = tool.get("description", "")
-            # Truncate description if too long
-            if len(tool_desc) > 60:
-                tool_desc = tool_desc[:57] + "..."
-            self.console.print(f"  • {tool_name}", style=STYLE_ACCENT)
-            if tool_desc:
-                self.console.print(f"    {tool_desc}", style=STYLE_MUTED)
-        
-        self.console.print()
-    
-    async def _cmd_mcp_servers(self) -> None:
-        """List MCP servers and their status."""
-        try:
-            async with httpx.AsyncClient() as client:
-                url = f"{self.server_url}/api/v1/mcp/servers"
-                response = await client.get(url, timeout=10.0)
-                response.raise_for_status()
-                servers = response.json()
-        except Exception as e:
-            self.console.print(f"[red]Error fetching MCP servers: {e}[/red]")
-            return
-        
-        if not servers:
-            self.console.print("No MCP servers running", style=STYLE_MUTED)
-            return
-        
-        self.console.print()
-        self.console.print(f"● MCP Servers ({len(servers)}):", style=STYLE_PRIMARY)
-        self.console.print()
-        
-        for server in servers:
-            server_id = server.get("id", "Unknown")
-            server_name = server.get("name", server_id)
-            is_available = server.get("isAvailable", False)
-            tools = server.get("tools", [])
-            
-            status = "[green]●[/green]" if is_available else "[red]●[/red]"
-            self.console.print(f"  {status} {server_name}", style=STYLE_ACCENT)
-            
-            if tools:
-                tool_names = [t.get("name", "?") for t in tools[:5]]
-                tools_str = ", ".join(tool_names)
-                if len(tools) > 5:
-                    tools_str += f" (+{len(tools) - 5} more)"
-                self.console.print(f"    Tools: {tools_str}", style=STYLE_MUTED)
-        
-        self.console.print()
-    
-    async def _cmd_skills(self) -> None:
-        """List available skills (requires codemode enabled)."""
-        # First check if codemode is enabled
-        try:
-            async with httpx.AsyncClient() as client:
-                url = f"{self.server_url}/api/v1/configure/codemode-status"
-                response = await client.get(url, timeout=10.0)
-                response.raise_for_status()
-                status_data = response.json()
-        except Exception as e:
-            self.console.print(f"[red]Error checking codemode status: {e}[/red]")
-            return
-        
-        codemode_enabled = status_data.get("enabled", False)
-        
-        if not codemode_enabled:
-            self.console.print()
-            self.console.print("● Codemode is disabled", style=STYLE_WARNING)
-            self.console.print("  Skills are only available when codemode is enabled.", style=STYLE_MUTED)
-            self.console.print("  Use /codemode-toggle to enable it.", style=STYLE_MUTED)
-            self.console.print()
-            return
-        
-        # Get skills from codemode status (it includes available_skills)
-        skills = status_data.get("available_skills", [])
-        active_skills = {s.get("name") for s in status_data.get("skills", [])}
-        
-        if not skills:
-            self.console.print("No skills available", style=STYLE_MUTED)
-            return
-        
-        self.console.print()
-        self.console.print(f"● Available Skills ({len(skills)}):", style=STYLE_PRIMARY)
-        self.console.print()
-        
-        for skill in skills:
-            skill_name = skill.get("name", "Unknown")
-            skill_desc = skill.get("description", "")
-            is_active = skill_name in active_skills
-            # Truncate description if too long
-            if len(skill_desc) > 60:
-                skill_desc = skill_desc[:57] + "..."
-            # Show active status
-            status_icon = "[green]●[/green]" if is_active else "○"
-            self.console.print(f"  {status_icon} {skill_name}", style=STYLE_ACCENT if is_active else STYLE_MUTED)
-            if skill_desc:
-                self.console.print(f"    {skill_desc}", style=STYLE_MUTED)
-        
-        self.console.print()
-    
-    async def _cmd_codemode_toggle(self) -> None:
-        """Toggle codemode on/off."""
-        # First get current status
-        try:
-            async with httpx.AsyncClient() as client:
-                status_url = f"{self.server_url}/api/v1/configure/codemode-status"
-                status_response = await client.get(status_url, timeout=10.0)
-                status_response.raise_for_status()
-                current_status = status_response.json()
-        except Exception as e:
-            self.console.print(f"[red]Error checking codemode status: {e}[/red]")
-            return
-        
-        current_enabled = current_status.get("enabled", False)
-        new_enabled = not current_enabled
-        
-        # Toggle to opposite state
-        try:
-            async with httpx.AsyncClient() as client:
-                url = f"{self.server_url}/api/v1/configure/codemode/toggle"
-                response = await client.post(
-                    url, 
-                    json={"enabled": new_enabled},
-                    timeout=10.0
-                )
-                response.raise_for_status()
-                data = response.json()
-        except Exception as e:
-            self.console.print(f"[red]Error toggling codemode: {e}[/red]")
-            return
-        
-        enabled = data.get("enabled", False)
-        
-        self.console.print()
-        if enabled:
-            self.console.print("● Codemode enabled", style=STYLE_ACCENT)
-            self.console.print("  Enhanced code capabilities are now active.", style=STYLE_MUTED)
-            self.console.print("  Use /skills to see available skills.", style=STYLE_MUTED)
-        else:
-            self.console.print("● Codemode disabled", style=STYLE_WARNING)
-            self.console.print("  Standard mode is now active.", style=STYLE_MUTED)
-        self.console.print()
-
-    async def _cmd_context_export(self) -> None:
-        """Export the current context to a CSV file."""
-        try:
-            async with httpx.AsyncClient() as client:
-                url = f"{self.server_url}/api/v1/configure/agents/{self.agent_id}/context-export"
-                response = await client.get(url, timeout=10.0)
-                response.raise_for_status()
-                data = response.json()
-        except Exception as e:
-            self.console.print(f"[red]Error fetching context: {e}[/red]")
-            return
-
-        if data.get("error"):
-            self.console.print(f"[red]{data.get('error')}[/red]")
-            return
-
-        filename = data.get("filename", "codeai_context.csv")
-        csv_content = data.get("csv", "")
-
-        if not csv_content:
-            self.console.print("[red]No CSV content returned.[/red]")
-            return
-
-        try:
-            with open(filename, "w", newline="") as csvfile:
-                csvfile.write(csv_content)
-
-            tools_count = data.get("toolsCount", 0)
-            messages_count = data.get("messagesCount", 0)
-
-            self.console.print()
-            self.console.print(f"● Context exported to {filename}", style=STYLE_ACCENT)
-            if tools_count or messages_count:
-                self.console.print(
-                    f"  Contains {tools_count} tools and {messages_count} messages",
-                    style=STYLE_MUTED,
-                )
-            self.console.print()
-        except IOError as e:
-            self.console.print(f"[red]Error writing file: {e}[/red]")
-
-    async def handle_command(self, user_input: str) -> bool:
+    async def handle_command(self, user_input: str) -> Optional[str]:
         """Handle a slash command.
         
-        Returns True if a command was handled, False otherwise.
+        Returns:
+            None if no command matched or the command produced no follow-up.
+            A non-empty string when a command returns a prompt to send to the agent
+            (e.g. /suggestions returns the chosen suggestion text).
+            The empty string "" signals the command was handled but has no follow-up.
         """
         if not user_input.startswith("/"):
-            return False
+            return None
         
         parts = user_input[1:].split(maxsplit=1)
         cmd_name = parts[0].lower() if parts else ""
@@ -820,13 +367,16 @@ class CodeAITux:
         if cmd_name in self.commands:
             cmd = self.commands[cmd_name]
             if cmd.handler:
-                await cmd.handler()
-            return True
+                result = await cmd.handler()
+                # Commands may return a string to use as the next prompt
+                if result:
+                    return result
+            return ""  # Command handled, no follow-up
         else:
             # Unknown command - show error with hint
             self.console.print(f"Unknown command: /{cmd_name}", style=STYLE_ERROR)
             self.console.print("Type /help to see available commands, or start typing / to see suggestions.", style=STYLE_MUTED)
-            return True
+            return ""  # Handled (error shown)
     
     async def send_message(self, message: str) -> None:
         """Send a message to the agent and stream the response."""
@@ -836,6 +386,7 @@ class CodeAITux:
         self.stats.messages += 1
         self.tool_calls = []  # Reset tool calls for this response
         current_tool_call: Optional[ToolCallInfo] = None
+        turn_start = time.monotonic()
         
         try:
             # Create or reuse the AG-UI client for conversation history
@@ -950,9 +501,16 @@ class CodeAITux:
             self.console.print(usage_line)
             
             total = input_tokens + output_tokens
+            elapsed = time.monotonic() - turn_start
+            if elapsed < 60:
+                time_str = f"{elapsed:.1f}s"
+            else:
+                minutes, secs = divmod(elapsed, 60)
+                time_str = f"{int(minutes)}m {secs:.0f}s"
             self.console.print(
                 f"  {self._format_tokens(total)} tokens used · "
-                f"{self._format_tokens(input_tokens)} in / {self._format_tokens(output_tokens)} out",
+                f"{self._format_tokens(input_tokens)} in / {self._format_tokens(output_tokens)} out · "
+                f"{time_str}",
                 style=STYLE_MUTED,
             )
             self.console.print()
@@ -981,74 +539,6 @@ class CodeAITux:
         )
         self.console.print("\\[/tools-last for details]", style=Style(color="rgb(89,89,92)", italic=True))
     
-    async def _cmd_tools_last(self) -> None:
-        """Show detailed information about tool calls from the last response."""
-        if not self.tool_calls:
-            self.console.print()
-            self.console.print("● No tool calls in the last response", style=STYLE_MUTED)
-            self.console.print()
-            return
-        
-        self.console.print()
-        self.console.print(f"● Tool Calls from Last Response ({len(self.tool_calls)}):", style=STYLE_PRIMARY)
-        self.console.print()
-        
-        for i, tc in enumerate(self.tool_calls, 1):
-            # Status indicator
-            if tc.status == "complete":
-                status_icon = "[green]✓[/green]"
-                status_style = STYLE_ACCENT
-            elif tc.status == "error":
-                status_icon = "[red]✗[/red]"
-                status_style = STYLE_ERROR
-            else:
-                status_icon = "[yellow]●[/yellow]"
-                status_style = STYLE_WARNING
-            
-            # Tool header
-            self.console.print(f"  {status_icon} {i}. {tc.tool_name}", style=STYLE_PRIMARY)
-            
-            # Arguments - show complete details
-            if tc.args_json:
-                try:
-                    args = json.loads(tc.args_json)
-                    if isinstance(args, dict):
-                        for key, value in args.items():
-                            val_str = str(value)
-                            # Show full value, preserving newlines with indentation
-                            if "\n" in val_str:
-                                self.console.print(f"     {key}:", style=STYLE_MUTED)
-                                for line in val_str.split("\n"):
-                                    self.console.print(f"       {line}", style=STYLE_MUTED)
-                            else:
-                                self.console.print(f"     {key}: {val_str}", style=STYLE_MUTED)
-                    else:
-                        self.console.print(f"     args: {tc.args_json}", style=STYLE_MUTED)
-                except json.JSONDecodeError:
-                    self.console.print(f"     args: {tc.args_json}", style=STYLE_MUTED)
-            
-            # Result - show complete details
-            if tc.result:
-                self.console.print("     result:", style=STYLE_MUTED)
-                for line in tc.result.split("\n"):
-                    self.console.print(f"       │ {line}", style=STYLE_MUTED)
-            
-            self.console.print()
-        
-        self.console.print()
-
-    async def _cmd_rain(self) -> None:
-        """Display Matrix rain animation (5 seconds)."""
-        await rain_animation(self.console)
-
-    async def _cmd_about(self) -> None:
-        """Display About Datalayer animation."""
-        await about_animation(self.console)
-
-    async def _cmd_gif(self) -> None:
-        """Display black hole spinning animation (5 seconds)."""
-        await gif_animation(self.console)
-
     async def run(self) -> None:
         """Run the main TUX loop."""
         self.running = True
@@ -1077,15 +567,20 @@ class CodeAITux:
                 
                 # Check for slash commands
                 if user_input.startswith("/"):
-                    await self.handle_command(user_input)
+                    result = await self.handle_command(user_input)
+                    # If a command returned a prompt string, send it to the agent
+                    if result:
+                        await self.send_message(result)
                 else:
                     await self.send_message(user_input)
                     
             except KeyboardInterrupt:
                 self.console.print()
-                await self._cmd_exit()
+                from .commands import exit as _exit_cmd
+                await _exit_cmd.execute(self)
             except EOFError:
-                await self._cmd_exit()
+                from .commands import exit as _exit_cmd
+                await _exit_cmd.execute(self)
 
 
 async def run_tux(
@@ -1094,6 +589,7 @@ async def run_tux(
     agent_id: str = "codeai",
     eggs: bool = False,
     jupyter_url: Optional[str] = None,
+    extra_suggestions: Optional[list[str]] = None,
 ) -> None:
     """Run the Code AI TUX.
     
@@ -1103,6 +599,7 @@ async def run_tux(
         agent_id: Agent ID for API calls
         eggs: Enable Easter egg commands
         jupyter_url: Jupyter server URL (only set when sandbox is jupyter)
+        extra_suggestions: Additional suggestions provided via --suggestions flag
     """
-    tux = CodeAITux(agent_url, server_url, agent_id, eggs=eggs, jupyter_url=jupyter_url)
+    tux = CodeAITux(agent_url, server_url, agent_id, eggs=eggs, jupyter_url=jupyter_url, extra_suggestions=extra_suggestions)
     await tux.run()

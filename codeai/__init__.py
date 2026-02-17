@@ -9,7 +9,7 @@ This package provides:
 - CLI interface for AI-powered code assistance
 - ACP (Agent Communication Protocol) client for remote agent connections
 - Interactive chat mode with local and remote agents
-- Terminal UX (TUX) with Claude Code-style interface
+- Terminal UX (TUX)
 """
 
 from codeai.cli import agent, main

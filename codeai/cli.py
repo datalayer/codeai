@@ -587,6 +587,12 @@ def main_callback(
         "--no-codemode",
         help="Disable codemode (MCP tools as programmatic tools)"
     ),
+    suggestions: Optional[str] = typer.Option(
+        None,
+        "--suggestions",
+        "-s",
+        help="Extra suggestions to add (comma-separated), e.g. 'Search for X,Summarize Y'"
+    ),
     eggs: bool = typer.Option(
         False,
         "--eggs",
@@ -739,7 +745,8 @@ def main_callback(
                 try:
                     # Use Rich-based TUX
                     from .tux import run_tux
-                    asyncio.run(run_tux(url, server_url, agent_id="codeai", eggs=eggs, jupyter_url=jupyter_url))
+                    extra_suggestions = [s.strip() for s in suggestions.split(",") if s.strip()] if suggestions else []
+                    asyncio.run(run_tux(url, server_url, agent_id="codeai", eggs=eggs, jupyter_url=jupyter_url, extra_suggestions=extra_suggestions))
                 finally:
                     _cleanup_subprocess()
             else:
