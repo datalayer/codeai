@@ -87,3 +87,11 @@ codeai-openteams-demo: # codeai-openteams-demo
 	GOOGLE_OAUTH_CLIENT_ID=${OPENTEAMS_DEMO_GOOGLE_CLIENT_ID} \
 	GOOGLE_OAUTH_CLIENT_SECRET=${OPENTEAMS_DEMO_GOOGLE_CLIENT_SECRET} \
 		codeai --eggs --agentspec-id codemode-paper/information-routing
+
+codeai-openteams-demo-nocodemode: # codeai-openteams-demo-codemode
+	@AWS_ACCESS_KEY_ID=${DATALAYER_BEDROCK_AWS_ACCESS_KEY_ID} \
+	AWS_SECRET_ACCESS_KEY=${DATALAYER_BEDROCK_AWS_SECRET_ACCESS_KEY} \
+	AWS_DEFAULT_REGION=${DATALAYER_BEDROCK_AWS_DEFAULT_REGION} \
+	GOOGLE_OAUTH_CLIENT_ID=${OPENTEAMS_DEMO_GOOGLE_CLIENT_ID} \
+	GOOGLE_OAUTH_CLIENT_SECRET=${OPENTEAMS_DEMO_GOOGLE_CLIENT_SECRET} \
+		codeai --eggs --agentspec-id codemode-paper/information-routing --no-codemode
