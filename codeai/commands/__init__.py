@@ -62,6 +62,7 @@ def build_commands(
         cls,
         browser,
         browser_notebook,
+        browser_lexical,
         suggestions,
     )
 
@@ -82,6 +83,7 @@ def build_commands(
         cls,
         browser,
         browser_notebook,
+        browser_lexical,
         suggestions,
     ]
 
