@@ -5,8 +5,8 @@
 
 /** @type {import('@docusaurus/types').DocusaurusConfig} */
 module.exports = {
-  title: '✨ Code AI',
-  tagline: '✨ Code AI - A CLI for data analysis that interacts with the Agent Runtimes via AG-UI and ACP protocols.',
+  title: '{ } Code AI',
+  tagline: '{ } Code AI - A CLI for data analysis that interacts with the Agent Runtimes via AG-UI and ACP protocols.',
   url: 'https://codeai.datalayer.tech',
   baseUrl: '/',
   onBrokenLinks: 'throw',
